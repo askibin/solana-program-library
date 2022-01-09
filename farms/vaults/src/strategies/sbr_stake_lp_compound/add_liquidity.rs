@@ -41,6 +41,9 @@ impl AddLiquidity for VaultInstruction {
             ] = accounts
         {
             // validate accounts
+            if !user_account.is_signer {
+                return Err(ProgramError::MissingRequiredSignature);
+            }
             if let VaultStrategy::StakeLpCompoundRewards {
                 lp_token_custody: lp_token_custody_key,
                 ..

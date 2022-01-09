@@ -19,6 +19,7 @@ pub enum TokenType {
     SplToken,
     LpToken,
     VtToken,
+    FundToken,
 }
 
 #[repr(u8)]
@@ -133,6 +134,7 @@ impl std::fmt::Display for TokenType {
             TokenType::SplToken => write!(f, "SplToken"),
             TokenType::LpToken => write!(f, "LpToken"),
             TokenType::VtToken => write!(f, "VtToken"),
+            TokenType::FundToken => write!(f, "FundToken"),
         }
     }
 }

@@ -127,7 +127,7 @@ pub struct Vault {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct UserInfo {
+pub struct VaultUserInfo {
     pub last_deposit_time: UnixTimestamp,
     pub last_withdrawal_time: UnixTimestamp,
     pub tokens_a_added: u64,
@@ -387,7 +387,7 @@ impl std::fmt::Display for Vault {
     }
 }
 
-impl std::fmt::Display for UserInfo {
+impl std::fmt::Display for VaultUserInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", to_string(&self).unwrap())
     }

@@ -1,6 +1,6 @@
 //! Solana Farm Client
 //!
-//! Solana Farm Client provides an easy way to interact with pools, farms, and vaults,
+//! Solana Farm Client provides an easy way to interact with pools, farms, vaults, and funds,
 //! query on-chain objects metadata, and perform common operations with accounts.
 //!
 //! Client's methods accept human readable names (tokens, polls, etc.) and UI (decimal)
@@ -57,6 +57,9 @@
 //! #  // get vault metadata
 //! #  client.get_vault("RDM.STC.RAY-SRM").unwrap();
 //! #
+//! #  // get fund metadata
+//! #  client.get_fund("TestFund").unwrap();
+//! #
 //! #  // get the list of all pools
 //! #  client.get_pools().unwrap();
 //! #
@@ -106,6 +109,16 @@
 //! #      .remove_liquidity_vault(&keypair, "RDM.STC.RAY-SRM", 0.0)
 //! #      .unwrap();
 //! #
+//! #  // request liquidity deposit to the fund
+//! #  client
+//! #      .request_deposit_fund(&keypair, "TestFund", "USDC", 0.01)
+//! #      .unwrap();
+//! #
+//! #  // request liquidity withdrawal from the fund (zero amount means withdraw everything)
+//! #  client
+//! #      .request_withdrawal_fund(&keypair, "TestFund", "USDC", 0.0)
+//! #      .unwrap();
+//! #
 //! #  // transfer SOL to another wallet
 //! #  client
 //! #      .transfer(&keypair, &Pubkey::new_unique(), 0.001)
@@ -132,22 +145,34 @@
 //! #      .new_instruction_add_liquidity_vault(&keypair.pubkey(), "RDM.STC.RAY-SRM", 0.1, 0.0)
 //! #      .unwrap();
 //! #
+//! #  // get fund stats and parameters
+//! #  client.get_fund_info("TestFund").unwrap();
+//! #
+//! #  // get fund custody info
+//! #  client.get_fund_custody("TestFund", "USDC").unwrap();
 
 use {
     crate::{cache::Cache, error::FarmClientError},
     arrayref::array_ref,
-    solana_account_decoder::parse_token::{
-        parse_token, TokenAccountType, UiAccountState, UiTokenAccount,
+    pyth_client::{CorpAction, PriceStatus, PriceType},
+    solana_account_decoder::{
+        parse_token::{parse_token, TokenAccountType, UiAccountState, UiTokenAccount},
+        UiAccountEncoding, UiDataSliceConfig,
     },
     solana_client::{
         client_error::ClientErrorKind,
         rpc_client::RpcClient,
-        rpc_config::RpcProgramAccountsConfig,
+        rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
         rpc_custom_error, rpc_filter,
         rpc_request::{RpcError, TokenAccountsFilter},
     },
     solana_farm_sdk::{
         farm::{Farm, FarmRoute},
+        fund::{
+            Fund, FundAssetType, FundAssets, FundAssetsTrackingConfig, FundCustody, FundInfo,
+            FundSchedule, FundUserInfo, OracleType, DISCRIMINATOR_FUND_CUSTODY,
+            DISCRIMINATOR_FUND_USER_INFO,
+        },
         id::{
             main_router, main_router_admin, zero, ProgramIDType, DAO_CUSTODY_NAME, DAO_MINT_NAME,
             DAO_PROGRAM_NAME, DAO_TOKEN_NAME,
@@ -163,12 +188,13 @@ use {
         refdb::RefDB,
         string::str_to_as64,
         token::{Token, TokenSelector, TokenType},
-        vault::{UserInfo, Vault, VaultInfo, VaultStrategy},
+        vault::{Vault, VaultInfo, VaultStrategy, VaultUserInfo},
     },
     solana_sdk::{
+        account::Account,
         borsh::try_from_slice_unchecked,
         clock::UnixTimestamp,
-        commitment_config::CommitmentConfig,
+        commitment_config::{CommitmentConfig, CommitmentLevel},
         hash::Hasher,
         instruction::{AccountMeta, Instruction},
         program_error::ProgramError,
@@ -201,6 +227,7 @@ use {
 };
 
 pub type VaultMap = HashMap<String, Vault>;
+pub type FundMap = HashMap<String, Fund>;
 pub type PoolMap = HashMap<String, Pool>;
 pub type FarmMap = HashMap<String, Farm>;
 pub type TokenMap = HashMap<String, Token>;
@@ -215,10 +242,12 @@ pub struct FarmClient {
     pools: RefCell<Cache<Pool>>,
     farms: RefCell<Cache<Farm>>,
     vaults: RefCell<Cache<Vault>>,
+    funds: RefCell<Cache<Fund>>,
     token_refs: RefCell<Cache<Pubkey>>,
     pool_refs: RefCell<Cache<Pubkey>>,
     farm_refs: RefCell<Cache<Pubkey>>,
     vault_refs: RefCell<Cache<Pubkey>>,
+    fund_refs: RefCell<Cache<Pubkey>>,
     official_ids: RefCell<Cache<Pubkey>>,
     stake_accounts: RefCell<Vec<HashMap<String, StakeAccMap>>>,
     latest_pools: RefCell<HashMap<String, String>>,
@@ -234,10 +263,12 @@ impl Default for FarmClient {
             pools: RefCell::new(Cache::<Pool>::default()),
             farms: RefCell::new(Cache::<Farm>::default()),
             vaults: RefCell::new(Cache::<Vault>::default()),
+            funds: RefCell::new(Cache::<Fund>::default()),
             token_refs: RefCell::new(Cache::<Pubkey>::default()),
             pool_refs: RefCell::new(Cache::<Pubkey>::default()),
             farm_refs: RefCell::new(Cache::<Pubkey>::default()),
             vault_refs: RefCell::new(Cache::<Pubkey>::default()),
+            fund_refs: RefCell::new(Cache::<Pubkey>::default()),
             official_ids: RefCell::new(Cache::<Pubkey>::default()),
             stake_accounts: RefCell::new(vec![HashMap::<String, StakeAccMap>::new(); 3]),
             latest_pools: RefCell::new(HashMap::<String, String>::new()),
@@ -290,6 +321,77 @@ impl FarmClient {
             rpc_client: RpcClient::new_mock(url.to_string()),
             ..FarmClient::default()
         }
+    }
+
+    /// Returns the Fund struct for the given name
+    pub fn get_fund(&self, name: &str) -> Result<Fund, FarmClientError> {
+        // reload Funds if stale
+        if self.funds.borrow().is_stale() {
+            self.funds.borrow_mut().reset();
+        } else {
+            // if Fund is in cache return it
+            if let Some(fund) = self.funds.borrow().data.get(name) {
+                return Ok(*fund);
+            }
+        }
+        // reload Fund refs if stale
+        self.reload_fund_refs_if_stale()?;
+        // load Fund data from blockchain
+        if let Some(key) = self.fund_refs.borrow().data.get(name) {
+            let fund = self.load_fund_by_ref(key)?;
+            self.funds.borrow_mut().data.insert(name.to_string(), fund);
+            return Ok(fund);
+        }
+        Err(FarmClientError::RecordNotFound(format!("Fund {}", name)))
+    }
+
+    /// Returns all Funds available
+    pub fn get_funds(&self) -> Result<FundMap, FarmClientError> {
+        if !self.funds.borrow().is_stale() {
+            return Ok(self.funds.borrow().data.clone());
+        }
+        self.reload_fund_refs_if_stale()?;
+        self.reload_funds_if_stale()?;
+        Ok(self.funds.borrow().data.clone())
+    }
+
+    /// Returns the Fund metadata address for the given name
+    pub fn get_fund_ref(&self, name: &str) -> Result<Pubkey, FarmClientError> {
+        // reload Fund refs if stale
+        self.reload_fund_refs_if_stale()?;
+        // return the address from cache
+        if let Some(key) = self.fund_refs.borrow().data.get(name) {
+            return Ok(*key);
+        }
+        Err(FarmClientError::RecordNotFound(format!("Fund {}", name)))
+    }
+
+    /// Returns Fund refs: a map of Fund name to account address with metadata
+    pub fn get_fund_refs(&self) -> Result<PubkeyMap, FarmClientError> {
+        self.reload_fund_refs_if_stale()?;
+        self.get_refdb_pubkey_map(&refdb::StorageType::Fund.to_string())
+    }
+
+    /// Returns the Fund metadata at the specified address
+    pub fn get_fund_by_ref(&self, fund_ref: &Pubkey) -> Result<Fund, FarmClientError> {
+        let name = &self.get_fund_name(fund_ref)?;
+        self.get_fund(name)
+    }
+
+    /// Returns the Fund name for the given metadata address
+    pub fn get_fund_name(&self, fund_ref: &Pubkey) -> Result<String, FarmClientError> {
+        // reload Fund refs if stale
+        self.reload_fund_refs_if_stale()?;
+        // return the name from cache
+        for (name, key) in self.fund_refs.borrow().data.iter() {
+            if key == fund_ref {
+                return Ok(name.to_string());
+            }
+        }
+        Err(FarmClientError::RecordNotFound(format!(
+            "Fund reference {}",
+            fund_ref
+        )))
     }
 
     /// Returns the Vault struct for the given name
@@ -902,13 +1004,17 @@ impl FarmClient {
     }
 
     /// Wait for the transaction to become finalized
-    pub fn confirm_async_transaction(&self, signature: &Signature) -> Result<(), FarmClientError> {
+    pub fn confirm_async_transaction(
+        &self,
+        signature: &Signature,
+        commitment: CommitmentLevel,
+    ) -> Result<(), FarmClientError> {
         let recent_blockhash = self.rpc_client.get_recent_blockhash()?.0;
         self.rpc_client
             .confirm_transaction_with_spinner(
                 signature,
                 &recent_blockhash,
-                CommitmentConfig::finalized(),
+                CommitmentConfig { commitment },
             )
             .map_err(Into::into)
     }
@@ -1193,7 +1299,7 @@ impl FarmClient {
         Ok(Pubkey::find_program_address(
             &[
                 b"user_info_account",
-                &wallet_address.to_bytes()[..],
+                wallet_address.as_ref(),
                 vault.name.as_bytes(),
             ],
             &vault.vault_program_id,
@@ -1235,13 +1341,13 @@ impl FarmClient {
         &self,
         wallet_address: &Pubkey,
         vault_name: &str,
-    ) -> Result<UserInfo, FarmClientError> {
+    ) -> Result<VaultUserInfo, FarmClientError> {
         let user_info_account = self.get_vault_user_info_account(wallet_address, vault_name)?;
         let data = self.rpc_client.get_account_data(&user_info_account)?;
         if !RefDB::is_initialized(data.as_slice()) {
             return Err(ProgramError::UninitializedAccount.into());
         }
-        let mut user_info = UserInfo::default();
+        let mut user_info = VaultUserInfo::default();
         let rec_vec = RefDB::read_all(data.as_slice())?;
         for rec in rec_vec.iter() {
             if let refdb::Reference::U64 { data } = rec.reference {
@@ -2012,9 +2118,11 @@ impl FarmClient {
         self.tokens.borrow_mut().reset();
         self.pools.borrow_mut().reset();
         self.vaults.borrow_mut().reset();
+        self.funds.borrow_mut().reset();
         self.token_refs.borrow_mut().reset();
         self.pool_refs.borrow_mut().reset();
         self.vault_refs.borrow_mut().reset();
+        self.fund_refs.borrow_mut().reset();
         self.official_ids.borrow_mut().reset();
         self.latest_pools.borrow_mut().clear();
         self.latest_farms.borrow_mut().clear();
@@ -2172,6 +2280,33 @@ impl FarmClient {
     ) -> Result<Signature, FarmClientError> {
         let inst =
             self.new_instruction_remove_program_id(&admin_signer.pubkey(), name, refdb_index)?;
+        self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
+    /// Records the Fund metadata
+    pub fn add_fund(
+        &self,
+        admin_signer: &dyn Signer,
+        fund: Fund,
+    ) -> Result<Signature, FarmClientError> {
+        self.funds
+            .borrow_mut()
+            .data
+            .insert(fund.name.to_string(), fund);
+        self.fund_refs.borrow_mut().reset();
+        let inst = self.new_instruction_add_fund(&admin_signer.pubkey(), fund)?;
+        self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
+    /// Removes the Fund's on-chain metadata
+    pub fn remove_fund(
+        &self,
+        admin_signer: &dyn Signer,
+        fund_name: &str,
+    ) -> Result<Signature, FarmClientError> {
+        let inst = self.new_instruction_remove_fund(&admin_signer.pubkey(), fund_name)?;
+        self.funds.borrow_mut().data.remove(fund_name);
+        self.fund_refs.borrow_mut().data.remove(fund_name);
         self.sign_and_send_instructions(&[admin_signer], &[inst])
     }
 
@@ -2770,6 +2905,504 @@ impl FarmClient {
         Ok(proposal_state)
     }
 
+    /// Returns the account address where Fund stats are stored for the user
+    pub fn get_fund_user_info_account(
+        &self,
+        wallet_address: &Pubkey,
+        fund_name: &str,
+        token_name: &str,
+    ) -> Result<Pubkey, FarmClientError> {
+        let fund = self.get_fund(fund_name)?;
+        let token = self.get_token(token_name)?;
+        Ok(Pubkey::find_program_address(
+            &[
+                b"user_info_account",
+                token.name.as_bytes(),
+                wallet_address.as_ref(),
+                fund.name.as_bytes(),
+            ],
+            &fund.fund_program_id,
+        )
+        .0)
+    }
+
+    /// Returns user info for specific Fund
+    pub fn get_fund_user_info(
+        &self,
+        wallet_address: &Pubkey,
+        fund_name: &str,
+        token_name: &str,
+    ) -> Result<FundUserInfo, FarmClientError> {
+        let user_info_account =
+            self.get_fund_user_info_account(wallet_address, fund_name, token_name)?;
+        let data = self.rpc_client.get_account_data(&user_info_account)?;
+        FundUserInfo::unpack(data.as_slice()).map_err(|e| e.into())
+    }
+
+    /// Returns all user info accounts belonging to the Fund
+    pub fn get_fund_user_infos(
+        &self,
+        fund_name: &str,
+    ) -> Result<Vec<FundUserInfo>, FarmClientError> {
+        let fund = self.get_fund(fund_name)?;
+        let fund_ref = self.get_fund_ref(fund_name)?;
+        // search for user info accounts
+        let bytes = [
+            &DISCRIMINATOR_FUND_USER_INFO.to_le_bytes(),
+            fund_ref.as_ref(),
+        ]
+        .concat()
+        .to_vec();
+        let acc_vec = self.get_accounts_with_filter(&fund.fund_program_id, 0, bytes)?;
+
+        let mut res = vec![];
+        for (_, acc) in acc_vec {
+            res.push(FundUserInfo::unpack(acc.data.as_slice())?);
+        }
+
+        Ok(res)
+    }
+
+    /// Returns Fund info and config
+    pub fn get_fund_info(&self, fund_name: &str) -> Result<FundInfo, FarmClientError> {
+        let fund = self.get_fund(fund_name)?;
+        let data = self.rpc_client.get_account_data(&fund.info_account)?;
+        if !RefDB::is_initialized(data.as_slice()) {
+            return Err(ProgramError::UninitializedAccount.into());
+        }
+        let mut fund_info = FundInfo::default();
+        let rec_vec = RefDB::read_all(data.as_slice())?;
+        for rec in rec_vec.iter() {
+            if let refdb::Reference::U64 { data } = rec.reference {
+                match rec.name.as_str() {
+                    "DepositStartTime" => {
+                        fund_info.deposit_schedule.start_time = data as UnixTimestamp
+                    }
+                    "DepositEndTime" => fund_info.deposit_schedule.end_time = data as UnixTimestamp,
+                    "DepositApprovalRequired" => {
+                        fund_info.deposit_schedule.approval_required = data != 0
+                    }
+                    "DepositLimitUsd" => {
+                        fund_info.deposit_schedule.limit_usd = f64::from_bits(data)
+                    }
+                    "DepositFee" => fund_info.deposit_schedule.fee = f64::from_bits(data),
+                    "WithdrawalStartTime" => {
+                        fund_info.withdrawal_schedule.start_time = data as UnixTimestamp
+                    }
+                    "WithdrawalEndTime" => {
+                        fund_info.withdrawal_schedule.end_time = data as UnixTimestamp
+                    }
+                    "WithdrawalApprovalRequired" => {
+                        fund_info.withdrawal_schedule.approval_required = data != 0
+                    }
+                    "WithdrawalLimitUsd" => {
+                        fund_info.withdrawal_schedule.limit_usd = f64::from_bits(data)
+                    }
+                    "WithdrawalFee" => fund_info.withdrawal_schedule.fee = f64::from_bits(data),
+                    "AssetsLimitUsd" => {
+                        fund_info.assets_config.assets_limit_usd = f64::from_bits(data)
+                    }
+                    "AssetsMaxUpdateAgeSec" => fund_info.assets_config.max_update_age_sec = data,
+                    "AssetsMaxPriceError" => {
+                        fund_info.assets_config.max_price_error = f64::from_bits(data)
+                    }
+                    "AssetsMaxPriceAgeSec" => fund_info.assets_config.max_price_age_sec = data,
+                    "AmountIvestedUsd" => fund_info.amount_invested_usd = data,
+                    "AmountRemovedUsd" => fund_info.amount_removed_usd = data,
+                    "CurrentAssetsUsd" => fund_info.current_assets_usd = data,
+                    "AssetsUpdateTime" => fund_info.assets_update_time = data as UnixTimestamp,
+                    "AdminActionTime" => fund_info.admin_action_time = data as UnixTimestamp,
+                    "LiquidationStartTime" => {
+                        fund_info.liquidation_start_time = data as UnixTimestamp
+                    }
+                    "LiquidationId" => fund_info.liquidation_id = data,
+                    "LiquidationTokenAmount" => fund_info.liquidation_token_amount = data,
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(fund_info)
+    }
+
+    /// Returns the account address where fund assets info is stored
+    pub fn get_fund_assets_account(
+        &self,
+        fund_name: &str,
+        asset_type: FundAssetType,
+    ) -> Result<Pubkey, FarmClientError> {
+        let fund = self.get_fund(fund_name)?;
+        match asset_type {
+            FundAssetType::Vault => Ok(Pubkey::find_program_address(
+                &[b"vaults_assets_info", fund.name.as_bytes()],
+                &fund.fund_program_id,
+            )
+            .0),
+            FundAssetType::Custody => Ok(Pubkey::find_program_address(
+                &[b"custodies_assets_info", fund.name.as_bytes()],
+                &fund.fund_program_id,
+            )
+            .0),
+        }
+    }
+
+    /// Returns the Fund assets info
+    pub fn get_fund_assets(
+        &self,
+        fund_name: &str,
+        asset_type: FundAssetType,
+    ) -> Result<FundAssets, FarmClientError> {
+        let assets_account = self.get_fund_assets_account(fund_name, asset_type)?;
+        let data = self.rpc_client.get_account_data(&assets_account)?;
+        FundAssets::unpack(data.as_slice()).map_err(|e| e.into())
+    }
+
+    /// Returns the token account address for the assets custody
+    pub fn get_fund_custody_token_account(
+        &self,
+        fund_name: &str,
+        token_name: &str,
+    ) -> Result<Pubkey, FarmClientError> {
+        let fund = self.get_fund(fund_name)?;
+        let token = self.get_token(token_name)?;
+        Ok(Pubkey::find_program_address(
+            &[
+                b"fund_custody_account",
+                token.name.as_bytes(),
+                fund.name.as_bytes(),
+            ],
+            &fund.fund_program_id,
+        )
+        .0)
+    }
+
+    /// Returns the token account address for the fees custody
+    pub fn get_fund_custody_fees_token_account(
+        &self,
+        fund_name: &str,
+        token_name: &str,
+    ) -> Result<Pubkey, FarmClientError> {
+        let fund = self.get_fund(fund_name)?;
+        let token = self.get_token(token_name)?;
+        Ok(Pubkey::find_program_address(
+            &[
+                b"fund_custody_fees_account",
+                token.name.as_bytes(),
+                fund.name.as_bytes(),
+            ],
+            &fund.fund_program_id,
+        )
+        .0)
+    }
+
+    /// Returns the account address where custody metadata is stored
+    pub fn get_fund_custody_account(
+        &self,
+        fund_name: &str,
+        token_name: &str,
+    ) -> Result<Pubkey, FarmClientError> {
+        let fund = self.get_fund(fund_name)?;
+        let token = self.get_token(token_name)?;
+        Ok(Pubkey::find_program_address(
+            &[
+                b"fund_custody_info",
+                token.name.as_bytes(),
+                fund.name.as_bytes(),
+            ],
+            &fund.fund_program_id,
+        )
+        .0)
+    }
+
+    /// Returns the custody metadata
+    pub fn get_fund_custody(
+        &self,
+        fund_name: &str,
+        token_name: &str,
+    ) -> Result<FundCustody, FarmClientError> {
+        let custody_info_account = self.get_fund_custody_account(fund_name, token_name)?;
+        let data = self.rpc_client.get_account_data(&custody_info_account)?;
+        FundCustody::unpack(data.as_slice()).map_err(|e| e.into())
+    }
+
+    /// Returns all custodies belonging to the Fund sorted by custody_id
+    pub fn get_fund_custodies(&self, fund_name: &str) -> Result<Vec<FundCustody>, FarmClientError> {
+        let fund = self.get_fund(fund_name)?;
+        let fund_ref = self.get_fund_ref(fund_name)?;
+        // search for custody accounts
+        let bytes = [&DISCRIMINATOR_FUND_CUSTODY.to_le_bytes(), fund_ref.as_ref()]
+            .concat()
+            .to_vec();
+        let acc_vec = self.get_accounts_with_filter(&fund.fund_program_id, 0, bytes)?;
+
+        let mut res = vec![];
+        for (_, acc) in acc_vec {
+            res.push(FundCustody::unpack(acc.data.as_slice())?);
+        }
+
+        res.sort_by_key(|k| k.custody_id);
+        Ok(res)
+    }
+
+    /// Adds a new custody to the Fund
+    pub fn add_fund_custody(
+        &self,
+        admin_signer: &dyn Signer,
+        fund_name: &str,
+        token_name: &str,
+    ) -> Result<Signature, FarmClientError> {
+        // create and send the instruction
+        let inst =
+            self.new_instruction_add_fund_custody(&admin_signer.pubkey(), fund_name, token_name)?;
+        self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
+    /// Initializes a Fund
+    pub fn init_fund(
+        &self,
+        admin_signer: &dyn Signer,
+        fund_name: &str,
+        step: u64,
+    ) -> Result<Signature, FarmClientError> {
+        let inst = self.new_instruction_init_fund(&admin_signer.pubkey(), fund_name, step)?;
+        self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
+    /// Initializes a new User for the Fund
+    pub fn user_init_fund(
+        &self,
+        signer: &dyn Signer,
+        fund_name: &str,
+        token_name: &str,
+    ) -> Result<Signature, FarmClientError> {
+        // create and send the instruction
+        let inst = self.new_instruction_user_init_fund(&signer.pubkey(), fund_name, token_name)?;
+        self.sign_and_send_instructions(&[signer], &[inst])
+    }
+
+    /// Sets a new assets tracking config for the Fund
+    pub fn set_fund_assets_tracking_config(
+        &self,
+        admin_signer: &dyn Signer,
+        fund_name: &str,
+        config: &FundAssetsTrackingConfig,
+    ) -> Result<Signature, FarmClientError> {
+        // create and send the instruction
+        let inst = self.new_instruction_set_fund_assets_tracking_config(
+            &admin_signer.pubkey(),
+            fund_name,
+            config,
+        )?;
+        self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
+    /// Sets a new deposit schedule for the Fund
+    pub fn set_fund_deposit_schedule(
+        &self,
+        admin_signer: &dyn Signer,
+        fund_name: &str,
+        schedule: &FundSchedule,
+    ) -> Result<Signature, FarmClientError> {
+        // create and send the instruction
+        let inst = self.new_instruction_set_fund_deposit_schedule(
+            &admin_signer.pubkey(),
+            fund_name,
+            schedule,
+        )?;
+        self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
+    /// Requests a new deposit to the Fund
+    pub fn request_deposit_fund(
+        &self,
+        signer: &dyn Signer,
+        fund_name: &str,
+        token_name: &str,
+        ui_amount: f64,
+    ) -> Result<Signature, FarmClientError> {
+        if ui_amount < 0.0 {
+            return Err(FarmClientError::ValueError(format!(
+                "Invalid deposit amount {} specified for Fund {}: Must be greater or equal to zero.",
+                ui_amount, fund_name
+            )));
+        }
+
+        let mut inst = Vec::<Instruction>::new();
+        let _ = self.check_fund_accounts(signer, fund_name, token_name, ui_amount, &mut inst)?;
+
+        // create and send the instruction
+        inst.push(self.new_instruction_request_deposit_fund(
+            &signer.pubkey(),
+            fund_name,
+            token_name,
+            ui_amount,
+        )?);
+        self.sign_and_send_instructions(&[signer], inst.as_slice())
+    }
+
+    /// Cancels pending deposit to the Fund
+    pub fn cancel_deposit_fund(
+        &self,
+        signer: &dyn Signer,
+        fund_name: &str,
+        token_name: &str,
+    ) -> Result<Signature, FarmClientError> {
+        // create and send the instruction
+        let inst =
+            self.new_instruction_cancel_deposit_fund(&signer.pubkey(), fund_name, token_name)?;
+        self.sign_and_send_instructions(&[signer], &[inst])
+    }
+
+    /// Approves pending deposit to the Fund
+    pub fn approve_deposit_fund(
+        &self,
+        admin_signer: &dyn Signer,
+        user_address: &Pubkey,
+        fund_name: &str,
+        token_name: &str,
+        ui_amount: f64,
+    ) -> Result<Signature, FarmClientError> {
+        if ui_amount < 0.0 {
+            return Err(FarmClientError::ValueError(format!(
+                "Invalid approve amount {} specified for Fund {}: Must be greater or equal to zero.",
+                ui_amount, fund_name
+            )));
+        }
+
+        // create and send the instruction
+        let inst = self.new_instruction_approve_deposit_fund(
+            &admin_signer.pubkey(),
+            &user_address,
+            fund_name,
+            token_name,
+            ui_amount,
+        )?;
+        self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
+    /// Returns oracle price account for the given symbol.
+    /// This is temporary solution and will be changed to either load
+    /// of on-chain mappings or static data from RefDB.
+    /*pub fn get_oracle_price_account(&self, symbol: &str, oracle_type: &OracleType) -> Result<Pubkey, FarmClientError> {
+        if !matches!(oracle_type, OracleType::Pyth) {
+            panic!("Oracle {} is unsupported", oracle_type);
+        }
+        let acc = match symbol {
+            "BCH/USD" => "5ALDzwcRJfSyGdGyhP3kP628aqBNHZzLuVww7o9kdspe",
+            "LTC/USD" => "8RMnV1eD55iqUFJLMguPkYBkq8DCtx81XcmAja93LvRR",
+            "BTC/USD" => "GVXRSBjFk6e6J3NbVPXohDJetcTjaeeuykUpbQF8UoMU",
+            "BNB/USD" => "4CkQJBxhU8EZ2UjhigbtdaPbpTe6mqf811fipYBFbSYN",
+            "DOGE/USD" => "FsSM3s38PX9K7Dn6eGzuE29S2Dsk1Sss1baytTQdCaQj",
+            "USDT/USD" => "3vxLXJqLqF3JG5TCbYycbKWRBbCJQLxQmBGCkyqEEefL",
+            "SOL/USD" => "H6ARHf6YXhGYeQfUzQNGk6rDNnLBQKrenN712K4AQJEG",
+            "USDC/USD" => "Gnt27xtC473ZT2Mw5u8wZ68Z3gULkSTb5DuxJy7eJotD",
+            "ETH/USD" => "JBu1AL4obBcCMqKBBxhpWCNUt136ijcuMZLFvTP7iWdB",
+            "SRM/USD" => "3NBReDRTLKMQEKiLD5tGcx4kXbTf88b7f2xLS9UuGjym",
+            "LUNA/USD" => "5bmWuR1dgP4avtGYMNKLuxumZTVKGgoN2BCMXWDNL9nY",
+            "FTT/USD" => "8JPJJkmDScpcNmBRKGZuPuG2GYAveQgP3t5gFuMymwvF",
+            "MER/USD" => "G4AQpTYKH1Fmg38VpFQbv6uKYQMpRhJzNPALhp7hqdrs",
+            "SABER/USD" => "8Td9VML1nHxQK6M8VVyzsHo32D7VBk72jSpa9U861z2A",
+            "RAY/USD" => "AnLf8tVYCM816gmBjiy8n53eXKKEDydT5piYjjQDPgTB",
+            "HXRO/USD" => "B47CC1ULLw1jKTSsr1N1198zrUHp3LPduzepJyzgLn2g",
+            "COPE/USD" => "9xYBiDWYsh2fHzpsz3aaCnNHCKWBNtfEDLtU6kS4aFD9",
+            "MIR/USD" => "m24crrKFG5jw5ySpvb1k83PRFKVUgzTRm4uvK2WYZtX",
+            "SNY/USD" => "BkN8hYgRjhyH5WNBQfDV73ivvdqNKfonCMhiYVJ1D9n9",
+            "MNGO/USD" => "79wm3jjcPr6RaNQ4DGvP5KxG1mNd3gEBsg6FsNVFezK4",
+            "ADA/USD" => "3pyn4svBbxJ9Wnn3RVeafyLWfzie6yC5eTig2S62v9SC",
+            "DOT/USD" => "EcV1X1gY2yb4KXxjVQtTHTbioum2gvmPnFk4zYAt7zne",
+            "ATOM/USD" => "CrCpTerNqtZvqLcKqz1k13oVeXV9WkMD2zA9hBKXrsbN",
+            "MSOL/USD" => "E4v1BBgoso9s64TQvmyownAVJbhbEPGyzA3qn4n46qj9",
+            "UST/USD" => "H8DvrfSaRfUyP1Ytse1exGf7VSinLWtmKNNaBhA4as9P",
+            "ALGO/USD" => "HqFyq1wh1xKvL7KDqqT7NJeSPdAqsDqnmBisUC2XdXAX",
+            "AVAX/USD" => "Ax9ujW5B9oqcv59N8m6f1BpTBq2rGeGaBcpKjC5UYsXU",
+            "ORCA/USD" => "4ivThkX8uRxBpHsdWSqyXYihzKF3zpRGAUCqyuagnLoV",
+            "MATIC/USD" => "7KVswB9vkCgeM3SHP7aGDijvdRAHK8P5wi9JXViCrtYh",
+            "SLND/USD" => "HkGEau5xY1e8REXUFbwvWWvyJGywkgiAZZFpryyraWqJ",
+            "STSOL/USD" => "Bt1hEbY62aMriY1SyQqbeZbm8VmSbQVGBFzSzMuVNWzN",
+            "PORT/USD" => "jrMH4afMEodMqirQ7P89q5bGNJxD8uceELcsZaVBDeh",
+            "FIDA/USD" => "ETp9eKXVv1dWwHSpsXRUuXHmw24PwRkttCGVgpZEY9zF",
+            _ => {
+                return Err(FarmClientError::RecordNotFound(format!(
+                    "Pyth account for {}",
+                    symbol
+                )))
+            }
+        };
+        Ok(Pubkey::from_str(acc).map_err(|_| {
+            FarmClientError::ValueError(format!("Failed to convert the String to a Pubkey {}", acc))
+        })?)
+    }*/
+    pub fn get_oracle_price_account(
+        &self,
+        symbol: &str,
+        oracle_type: OracleType,
+    ) -> Result<Pubkey, FarmClientError> {
+        if !matches!(oracle_type, OracleType::Pyth) {
+            panic!("Oracle {} is unsupported", oracle_type);
+        }
+        let acc = match symbol {
+            "SOL/USD" => "J83w4HKfqxwcq3BEMMkPFSppX3gqekLyLJBexebFVkix",
+            _ => {
+                return Err(FarmClientError::RecordNotFound(format!(
+                    "Pyth account for {}",
+                    symbol
+                )))
+            }
+        };
+        Ok(Pubkey::from_str(acc).map_err(|_| {
+            FarmClientError::ValueError(format!("Failed to convert the String to a Pubkey {}", acc))
+        })?)
+    }
+
+    pub fn get_oracle_price(
+        &self,
+        symbol: &str,
+        oracle_type: OracleType,
+        max_price_age_sec: u64,
+        max_price_error: f64,
+    ) -> Result<f64, FarmClientError> {
+        if !matches!(oracle_type, OracleType::Pyth) {
+            panic!("Oracle {} is unsupported", oracle_type);
+        }
+        let pyth_price_account = self.get_oracle_price_account(symbol, oracle_type)?;
+        let pyth_price_data = self.rpc_client.get_account_data(&pyth_price_account)?;
+        let pyth_price = pyth_client::cast::<pyth_client::Price>(pyth_price_data.as_slice());
+
+        if !matches!(pyth_price.agg.status, PriceStatus::Trading)
+            || !matches!(pyth_price.ptype, PriceType::Price)
+        {
+            return Err(FarmClientError::ValueError(
+                "Error: Pyth oracle price has invalid state".to_string(),
+            ));
+        }
+
+        if max_price_age_sec > 0 {
+            let current_slot = self.rpc_client.get_slot()?;
+            let last_update_age_sec = if current_slot > pyth_price.valid_slot {
+                (current_slot - pyth_price.valid_slot) * solana_sdk::clock::DEFAULT_MS_PER_SLOT
+                    / 1000
+            } else {
+                0
+            };
+            if last_update_age_sec > max_price_age_sec {
+                return Err(FarmClientError::ValueError(
+                    "Error: Pyth oracle price is stale".to_string(),
+                ));
+            }
+        }
+
+        if pyth_price.agg.price <= 0
+            || (max_price_error > 0.0
+                && pyth_price.agg.conf as f64 / pyth_price.agg.price as f64 > max_price_error)
+        {
+            return Err(FarmClientError::ValueError(
+                "Error: Pyth oracle price is out of bounds".to_string(),
+            ));
+        }
+
+        Ok(pyth_price.agg.price as f64 * f64::powi(10.0, pyth_price.expo))
+    }
+
     /////////////// helpers
     pub fn ui_amount_to_tokens(
         &self,
@@ -2777,10 +3410,16 @@ impl FarmClient {
         token_name: &str,
     ) -> Result<u64, FarmClientError> {
         if ui_amount == 0.0 {
-            return Ok(0);
+            Ok(0)
+        } else if ui_amount < 0.0 {
+            Err(FarmClientError::ValueError(format!(
+                "Invalid ui_amount: {}",
+                ui_amount
+            )))
+        } else {
+            let multiplier = 10usize.pow(self.get_token(token_name)?.decimals as u32);
+            Ok((ui_amount * multiplier as f64).round() as u64)
         }
-        let multiplier = 10usize.pow(self.get_token(token_name)?.decimals as u32);
-        Ok((ui_amount * multiplier as f64).round() as u64)
     }
 
     pub fn tokens_to_ui_amount(
@@ -2796,7 +3435,7 @@ impl FarmClient {
     }
 
     pub fn ui_amount_to_tokens_with_decimals(&self, ui_amount: f64, decimals: u8) -> u64 {
-        if ui_amount == 0.0 {
+        if ui_amount <= 0.0 {
             return 0;
         }
         let multiplier = 10usize.pow(decimals as u32);
@@ -2975,6 +3614,32 @@ impl FarmClient {
         self.sign_and_send_instructions(&[signer], inst.as_slice())
     }
 
+    pub fn get_accounts_with_filter(
+        &self,
+        program: &Pubkey,
+        offset: usize,
+        bytes: Vec<u8>,
+    ) -> Result<Vec<(Pubkey, Account)>, FarmClientError> {
+        let filters = Some(vec![rpc_filter::RpcFilterType::Memcmp(
+            rpc_filter::Memcmp {
+                offset,
+                bytes: rpc_filter::MemcmpEncodedBytes::Bytes(bytes),
+                encoding: Some(rpc_filter::MemcmpEncoding::Binary),
+            },
+        )]);
+        Ok(self.rpc_client.get_program_accounts_with_config(
+            program,
+            RpcProgramAccountsConfig {
+                filters,
+                account_config: RpcAccountInfoConfig {
+                    encoding: Some(UiAccountEncoding::Base64),
+                    ..RpcAccountInfoConfig::default()
+                },
+                ..RpcProgramAccountsConfig::default()
+            },
+        )?)
+    }
+
     ////////////// private helpers
     fn to_token_amount(&self, ui_amount: f64, token: &Token) -> u64 {
         self.ui_amount_to_tokens_with_decimals(ui_amount, token.decimals)
@@ -3010,6 +3675,11 @@ impl FarmClient {
     fn load_farm_by_ref(&self, farm_ref: &Pubkey) -> Result<Farm, FarmClientError> {
         let data = self.rpc_client.get_account_data(farm_ref)?;
         Ok(Farm::unpack(data.as_slice())?)
+    }
+
+    fn load_fund_by_ref(&self, fund_ref: &Pubkey) -> Result<Fund, FarmClientError> {
+        let data = self.rpc_client.get_account_data(fund_ref)?;
+        Ok(Fund::unpack(data.as_slice())?)
     }
 
     fn extract_version(name: &str) -> Result<u16, FarmClientError> {
@@ -3054,6 +3724,51 @@ impl FarmClient {
         }
         for (name, (full_name, _)) in latest {
             dest.insert(name, full_name);
+        }
+    }
+
+    fn reload_fund_refs_if_stale(&self) -> Result<bool, FarmClientError> {
+        if self.fund_refs.borrow().is_stale() {
+            let fund_refs = self.get_refdb_pubkey_map(&refdb::StorageType::Fund.to_string())?;
+            self.fund_refs.borrow_mut().set(fund_refs);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    fn reload_funds_if_stale(&self) -> Result<bool, FarmClientError> {
+        if self.funds.borrow().is_stale() {
+            let refs_map = &self.fund_refs.borrow().data;
+            let refs: Vec<Pubkey> = refs_map.values().copied().collect();
+            if refs.is_empty() {
+                return Ok(false);
+            }
+            let mut fund_map = FundMap::new();
+
+            let mut idx = 0;
+            while idx < refs.len() - 1 {
+                let refs_slice = &refs.as_slice()[idx..std::cmp::min(idx + 100, refs.len())];
+                let accounts = self.rpc_client.get_multiple_accounts(refs_slice)?;
+
+                for (account_option, account_ref) in accounts.iter().zip(refs_slice.iter()) {
+                    if let Some(account) = account_option {
+                        let fund = Fund::unpack(account.data.as_slice())?;
+                        fund_map.insert(fund.name.as_str().to_string(), fund);
+                    } else {
+                        return Err(FarmClientError::RecordNotFound(format!(
+                            "Fund with ref {}",
+                            account_ref
+                        )));
+                    }
+                }
+                idx += 100;
+            }
+
+            self.funds.borrow_mut().set(fund_map);
+            Ok(true)
+        } else {
+            Ok(false)
         }
     }
 
@@ -3321,21 +4036,10 @@ impl FarmClient {
             }
         }
         // search on-chain
-        let filters = Some(vec![rpc_filter::RpcFilterType::Memcmp(
-            rpc_filter::Memcmp {
-                offset: 40,
-                bytes: rpc_filter::MemcmpEncodedBytes::Base58(
-                    bs58::encode(wallet_address).into_string(),
-                ),
-                encoding: Some(rpc_filter::MemcmpEncoding::Binary),
-            },
-        )]);
-        let acc_vec = self.rpc_client.get_program_accounts_with_config(
+        let acc_vec = self.get_accounts_with_filter(
             &farm.farm_program_id,
-            RpcProgramAccountsConfig {
-                filters,
-                ..RpcProgramAccountsConfig::default()
-            },
+            40,
+            wallet_address.as_ref().to_vec(),
         )?;
         let user_acc_str = wallet_address.to_string();
         let stake_accounts_map = &mut self.stake_accounts.borrow_mut()[0];
@@ -3991,6 +4695,55 @@ impl FarmClient {
         Ok(())
     }
 
+    fn check_fund_accounts(
+        &self,
+        signer: &dyn Signer,
+        fund_name: &str,
+        token_name: &str,
+        ui_amount: f64,
+        instruction_vec: &mut Vec<Instruction>,
+    ) -> Result<(), FarmClientError> {
+        let fund = self.get_fund(fund_name)?;
+        let fund_token = Some(self.get_token_by_ref(&fund.fund_token_ref)?);
+        let asset_token = Some(self.get_token(token_name)?);
+
+        let _ = self.check_token_account(&signer.pubkey(), &fund_token, 0.0, instruction_vec)?;
+
+        let ui_amount = if ui_amount == 0.0 && token_name == "SOL" {
+            let balance = self.get_account_balance(&signer.pubkey())?;
+            let min_balance = self.rpc_client.get_minimum_balance_for_rent_exemption(0)?;
+            let fees = self
+                .rpc_client
+                .get_fees()?
+                .fee_calculator
+                .lamports_per_signature
+                * 10;
+            let to_leave = self.tokens_to_ui_amount(min_balance + fees, "SOL")?;
+            if balance > to_leave {
+                balance - to_leave
+            } else {
+                0.0
+            }
+        } else {
+            ui_amount
+        };
+        let _ =
+            self.check_token_account(&signer.pubkey(), &asset_token, ui_amount, instruction_vec)?;
+
+        if self
+            .get_fund_user_info(&signer.pubkey(), fund_name, token_name)
+            .is_err()
+        {
+            instruction_vec.push(self.new_instruction_user_init_fund(
+                &signer.pubkey(),
+                fund_name,
+                token_name,
+            )?);
+        }
+
+        Ok(())
+    }
+
     fn get_vault_lp_token_decimals(&self, vault_name: &str) -> Result<u8, FarmClientError> {
         let pool = self.get_underlying_pool(vault_name)?;
         if let Some(pool_token) = self.get_token_by_ref_from_cache(&pool.lp_token_ref)? {
@@ -4035,6 +4788,7 @@ mod farm_accounts_orca;
 mod farm_accounts_raydium;
 mod farm_accounts_saber;
 mod farm_instructions;
+mod fund_instructions;
 mod governance_instructions;
 mod pool_accounts_orca;
 mod pool_accounts_raydium;

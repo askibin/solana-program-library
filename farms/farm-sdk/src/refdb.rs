@@ -165,6 +165,7 @@ pub enum StorageType {
     Pool,
     Farm,
     Token,
+    Fund,
     Other,
 }
 
@@ -172,6 +173,7 @@ impl StorageType {
     pub const fn get_default_size(storage_type: StorageType) -> usize {
         match storage_type {
             StorageType::Program => 25000usize,
+            StorageType::Fund => 10000usize,
             StorageType::Vault => 25000usize,
             StorageType::Pool => 50000usize,
             StorageType::Farm => 25000usize,
@@ -214,6 +216,7 @@ impl std::fmt::Display for StorageType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
             StorageType::Program => write!(f, "Program"),
+            StorageType::Fund => write!(f, "Fund"),
             StorageType::Vault => write!(f, "Vault"),
             StorageType::Pool => write!(f, "Pool"),
             StorageType::Farm => write!(f, "Farm"),
@@ -229,6 +232,7 @@ impl std::str::FromStr for StorageType {
     fn from_str(s: &str) -> Result<Self, ProgramError> {
         match s {
             "Program" => Ok(StorageType::Program),
+            "Fund" => Ok(StorageType::Fund),
             "Vault" => Ok(StorageType::Vault),
             "Pool" => Ok(StorageType::Pool),
             "Farm" => Ok(StorageType::Farm),

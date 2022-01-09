@@ -134,7 +134,7 @@ pub fn get_clap_app<'a, 'b>(version: &'b str) -> App<'a, 'b> {
     let target = Arg::with_name("target")
         .required(true)
         .takes_value(true)
-        .possible_values(&["program", "vault", "farm", "pool", "token"])
+        .possible_values(&["program", "vault", "farm", "pool", "token", "fund"])
         .hide_possible_values(true)
         .help("Target object type (program, vault, etc.)");
 
@@ -343,6 +343,17 @@ pub fn get_clap_app<'a, 'b>(version: &'b str) -> App<'a, 'b> {
             SubCommand::with_name("vault-user-info")
                 .about("Print user stats for the vault")
                 .arg(get_arg("vault_name")),
+        )
+        .subcommand(
+            SubCommand::with_name("fund-info")
+                .about("Print fund stats")
+                .arg(get_arg("fund_name")),
+        )
+        .subcommand(
+            SubCommand::with_name("fund-user-info")
+                .about("Print user stats for the fund")
+                .arg(get_arg("fund_name"))
+                .arg(tokenname.clone()),
         )
         .subcommand(
             SubCommand::with_name("find-pools")

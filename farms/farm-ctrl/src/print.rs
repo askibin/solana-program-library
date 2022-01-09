@@ -5,7 +5,7 @@ use {
     log::info,
     solana_farm_client::client::FarmClient,
     solana_farm_sdk::{
-        farm::Farm, pool::Pool, program::pda, refdb::ReferenceType, refdb::StorageType,
+        farm::Farm, fund::Fund, pool::Pool, program::pda, refdb::ReferenceType, refdb::StorageType,
         token::Token, vault::Vault,
     },
 };
@@ -24,6 +24,7 @@ pub fn print_pda_all(client: &FarmClient, config: &Config) {
     print_pda(client, config, StorageType::Pool);
     print_pda(client, config, StorageType::Farm);
     print_pda(client, config, StorageType::Vault);
+    print_pda(client, config, StorageType::Fund);
 }
 
 pub fn print_size(client: &FarmClient, _config: &Config, target: StorageType) {
@@ -34,6 +35,7 @@ pub fn print_size(client: &FarmClient, _config: &Config, target: StorageType) {
         StorageType::Pool => Pool::MAX_LEN,
         StorageType::Farm => Farm::MAX_LEN,
         StorageType::Vault => Vault::MAX_LEN,
+        StorageType::Fund => Fund::LEN,
         _ => 0,
     };
     let target_max_recs = StorageType::get_default_max_records(target, ReferenceType::Pubkey);
@@ -73,6 +75,7 @@ pub fn print_size_all(client: &FarmClient, config: &Config) {
     print_size(client, config, StorageType::Pool);
     print_size(client, config, StorageType::Farm);
     print_size(client, config, StorageType::Vault);
+    print_size(client, config, StorageType::Fund);
 }
 
 fn lam_to_sol(amount: u64) -> f64 {

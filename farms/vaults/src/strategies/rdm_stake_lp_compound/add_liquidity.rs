@@ -61,6 +61,9 @@ impl AddLiquidity for VaultInstruction {
                 msg!("Error: Invalid Vault accounts");
                 return Err(ProgramError::InvalidArgument);
             }
+            if !user_account.is_signer {
+                return Err(ProgramError::MissingRequiredSignature);
+            }
             if &account::get_token_account_owner(user_vt_token_account)? != user_account.key {
                 msg!("Error: Invalid VT token account owner");
                 return Err(ProgramError::IllegalOwner);

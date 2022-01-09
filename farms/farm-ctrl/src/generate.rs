@@ -7,17 +7,93 @@ use {
     solana_farm_client::client::FarmClient,
     solana_farm_sdk::{
         farm::{FarmRoute, FarmType},
+        fund::{Fund, FundType},
         git_token::GitToken,
         id::main_router_admin,
         program::pda::find_target_pda,
         refdb::StorageType,
-        string::{str_to_as64, to_pretty_json},
+        string::{str_to_as64, to_pretty_json, ArrayString64},
         vault::{Vault, VaultStrategy, VaultType},
     },
     solana_sdk::pubkey::Pubkey,
     std::collections::HashMap,
     std::str::FromStr,
 };
+
+pub fn generate_fund(
+    client: &FarmClient,
+    _config: &Config,
+    fund_address: &Pubkey,
+    fund_name: &str,
+    token_name: &str,
+) {
+    let fund = Fund {
+        name: str_to_as64(fund_name).unwrap(),
+        description: ArrayString64::default(),
+        version: 1,
+        fund_type: FundType::General,
+        official: true,
+        refdb_index: None,
+        refdb_counter: 0,
+        metadata_bump: find_target_pda(StorageType::Fund, &str_to_as64(fund_name).unwrap()).1,
+        authority_bump: Pubkey::find_program_address(
+            &[b"fund_authority", fund_name.as_bytes()],
+            fund_address,
+        )
+        .1,
+        fund_token_bump: Pubkey::find_program_address(
+            &[b"fund_token_mint", fund_name.as_bytes()],
+            fund_address,
+        )
+        .1,
+        fund_program_id: *fund_address,
+        fund_authority: Pubkey::find_program_address(
+            &[b"fund_authority", fund_name.as_bytes()],
+            fund_address,
+        )
+        .0,
+        fund_token_ref: find_target_pda(StorageType::Token, &str_to_as64(token_name).unwrap()).0,
+        info_account: Pubkey::find_program_address(
+            &[b"info_account", fund_name.as_bytes()],
+            fund_address,
+        )
+        .0,
+        admin_account: main_router_admin::id(),
+        vaults_assets_info: Pubkey::find_program_address(
+            &[b"vaults_assets_info", fund_name.as_bytes()],
+            fund_address,
+        )
+        .0,
+        custodies_assets_info: Pubkey::find_program_address(
+            &[b"custodies_assets_info", fund_name.as_bytes()],
+            fund_address,
+        )
+        .0,
+        liquidation_state: Pubkey::find_program_address(
+            &[b"liquidation_state", fund_name.as_bytes()],
+            fund_address,
+        )
+        .0,
+    };
+    println!("{}", to_pretty_json(&fund).unwrap());
+
+    let token = GitToken {
+        chain_id: 101,
+        address: Pubkey::find_program_address(
+            &[b"fund_token_mint", fund_name.as_bytes()],
+            fund_address,
+        )
+        .0
+        .to_string(),
+        symbol: token_name.to_string(),
+        name: fund_name.to_string() + " Token",
+        decimals: 6,
+        logo_uri: String::default(),
+        tags: vec!["fund-token".to_string()],
+        extra: HashMap::<String, Value>::default(),
+    };
+    println!("{}", to_pretty_json(&token).unwrap());
+}
 
 pub fn generate_rdm_stc_vault(
     client: &FarmClient,
@@ -335,6 +411,13 @@ pub fn generate(
                 panic!("Unexpected Vault name: {}", param1);
             }
         }
+        StorageType::Fund => generate_fund(
+            client,
+            config,
+            &Pubkey::from_str(object).unwrap(),
+            param1,
+            param2,
+        ),
         _ => {
             panic!("Target is not supported: {}", target);
         }

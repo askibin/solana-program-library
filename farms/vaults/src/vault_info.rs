@@ -1,8 +1,9 @@
 //! Vault info account management.
 
 use {
-    crate::{clock, traits::VaultParams},
+    crate::traits::VaultParams,
     solana_farm_sdk::{
+        program::clock,
         refdb,
         refdb::{RefDB, Reference, ReferenceType},
         string::{str_to_as64, ArrayString64},
@@ -334,7 +335,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data as UnixTimestamp);
             }
         }
-        Ok(0)
+        return Err(ProgramError::InvalidAccountData);
     }
 
     pub fn get_crank_step(&self) -> Result<u64, ProgramError> {
@@ -343,7 +344,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data);
             }
         }
-        Ok(0)
+        return Err(ProgramError::InvalidAccountData);
     }
 
     pub fn get_min_crank_interval(&self) -> Result<i64, ProgramError> {
@@ -352,7 +353,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data as i64);
             }
         }
-        Ok(0)
+        return Err(ProgramError::InvalidAccountData);
     }
 
     pub fn get_fee(&self) -> Result<f64, ProgramError> {
@@ -361,7 +362,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(f64::from_bits(data));
             }
         }
-        Ok(0.0)
+        return Err(ProgramError::InvalidAccountData);
     }
 
     pub fn get_external_fee(&self) -> Result<f64, ProgramError> {
@@ -370,7 +371,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(f64::from_bits(data));
             }
         }
-        Ok(0.0)
+        return Err(ProgramError::InvalidAccountData);
     }
 
     pub fn is_deposit_allowed(&self) -> Result<bool, ProgramError> {
@@ -379,7 +380,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data > 0);
             }
         }
-        Ok(false)
+        return Err(ProgramError::InvalidAccountData);
     }
 
     pub fn is_withdrawal_allowed(&self) -> Result<bool, ProgramError> {
@@ -388,7 +389,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data > 0);
             }
         }
-        Ok(false)
+        return Err(ProgramError::InvalidAccountData);
     }
 
     pub fn get_token_a_added(&self) -> Result<u64, ProgramError> {
@@ -397,7 +398,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data);
             }
         }
-        Ok(0)
+        return Err(ProgramError::InvalidAccountData);
     }
 
     pub fn get_token_b_added(&self) -> Result<u64, ProgramError> {
@@ -406,7 +407,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data);
             }
         }
-        Ok(0)
+        return Err(ProgramError::InvalidAccountData);
     }
 
     pub fn get_token_a_removed(&self) -> Result<u64, ProgramError> {
@@ -415,7 +416,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data);
             }
         }
-        Ok(0)
+        return Err(ProgramError::InvalidAccountData);
     }
 
     pub fn get_token_b_removed(&self) -> Result<u64, ProgramError> {
@@ -424,7 +425,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data);
             }
         }
-        Ok(0)
+        return Err(ProgramError::InvalidAccountData);
     }
 
     pub fn get_token_a_rewards(&self) -> Result<u64, ProgramError> {
@@ -433,7 +434,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data);
             }
         }
-        Ok(0)
+        return Err(ProgramError::InvalidAccountData);
     }
 
     pub fn get_token_b_rewards(&self) -> Result<u64, ProgramError> {
@@ -442,7 +443,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data);
             }
         }
-        Ok(0)
+        return Err(ProgramError::InvalidAccountData);
     }
 
     // private helpers

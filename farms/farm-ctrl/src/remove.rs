@@ -14,6 +14,11 @@ pub fn remove(client: &FarmClient, config: &Config, target: StorageType, object:
                 .remove_program_id(config.keypair.as_ref(), object, None)
                 .unwrap();
         }
+        StorageType::Fund => {
+            client
+                .remove_fund(config.keypair.as_ref(), &object.to_uppercase())
+                .unwrap();
+        }
         StorageType::Vault => {
             client
                 .remove_vault(config.keypair.as_ref(), &object.to_uppercase())
@@ -63,6 +68,12 @@ pub fn remove_all(client: &FarmClient, config: &Config, target: StorageType) {
                 client
                     .remove_program_id(config.keypair.as_ref(), name, None)
                     .unwrap();
+            }
+        }
+        StorageType::Fund => {
+            let storage = client.get_funds().unwrap();
+            for (name, _) in storage.iter() {
+                client.remove_fund(config.keypair.as_ref(), name).unwrap();
             }
         }
         StorageType::Vault => {

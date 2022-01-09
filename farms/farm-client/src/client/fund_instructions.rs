@@ -1,0 +1,370 @@
+//! Solana Farm Client Fund Instructions
+
+use {
+    crate::error::FarmClientError,
+    arrayref::array_ref,
+    solana_farm_sdk::{
+        fund::{FundAssetType, FundAssetsTrackingConfig, FundSchedule, OracleType},
+        instruction::fund::FundInstruction,
+    },
+    solana_sdk::{
+        hash::Hasher,
+        instruction::{AccountMeta, Instruction},
+        program_error::ProgramError,
+        pubkey::Pubkey,
+        system_program, sysvar,
+    },
+};
+
+use super::FarmClient;
+
+impl FarmClient {
+    /// Creates a new Fund Init Instruction
+    pub fn new_instruction_init_fund(
+        &self,
+        admin_address: &Pubkey,
+        fund_name: &str,
+        step: u64,
+    ) -> Result<Instruction, FarmClientError> {
+        // get fund info
+        let fund = self.get_fund(fund_name)?;
+        let fund_ref = self.get_fund_ref(fund_name)?;
+        let fund_token = self.get_token_by_ref(&fund.fund_token_ref)?;
+
+        // fill in accounts and instruction data
+        let data = FundInstruction::Init { step }.to_vec()?;
+        let accounts = vec![
+            AccountMeta::new_readonly(*admin_address, true),
+            AccountMeta::new_readonly(fund_ref, false),
+            AccountMeta::new(fund.info_account, false),
+            AccountMeta::new(fund.fund_authority, false),
+            AccountMeta::new_readonly(fund.fund_program_id, false),
+            AccountMeta::new_readonly(system_program::id(), false),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new_readonly(sysvar::rent::id(), false),
+            AccountMeta::new(fund_token.mint, false),
+            AccountMeta::new_readonly(fund.fund_token_ref, false),
+            AccountMeta::new(fund.vaults_assets_info, false),
+            AccountMeta::new(fund.custodies_assets_info, false),
+            AccountMeta::new(fund.liquidation_state, false),
+        ];
+
+        Ok(Instruction {
+            program_id: fund.fund_program_id,
+            data,
+            accounts,
+        })
+    }
+
+    /// Creates a new Instruction for initializing a new User for the Fund
+    pub fn new_instruction_user_init_fund(
+        &self,
+        wallet_address: &Pubkey,
+        fund_name: &str,
+        token_name: &str,
+    ) -> Result<Instruction, FarmClientError> {
+        // get fund info
+        let fund = self.get_fund(fund_name)?;
+        let fund_ref = self.get_fund_ref(fund_name)?;
+        let token_ref = self.get_token_ref(token_name)?;
+        let user_info_account =
+            self.get_fund_user_info_account(wallet_address, fund_name, token_name)?;
+
+        // fill in accounts and instruction data
+        let data = FundInstruction::UserInit.to_vec()?;
+        let accounts = vec![
+            AccountMeta::new_readonly(*wallet_address, true),
+            AccountMeta::new_readonly(fund_ref, false),
+            AccountMeta::new(fund.info_account, false),
+            AccountMeta::new(user_info_account, false),
+            AccountMeta::new_readonly(token_ref, false),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ];
+
+        Ok(Instruction {
+            program_id: fund.fund_program_id,
+            data,
+            accounts,
+        })
+    }
+
+    /// Creates a new set fund assets tracking config Instruction
+    pub fn new_instruction_set_fund_assets_tracking_config(
+        &self,
+        admin_address: &Pubkey,
+        fund_name: &str,
+        config: &FundAssetsTrackingConfig,
+    ) -> Result<Instruction, FarmClientError> {
+        // get fund info
+        let fund = self.get_fund(fund_name)?;
+        let fund_ref = self.get_fund_ref(fund_name)?;
+
+        // fill in accounts and instruction data
+        let data = FundInstruction::SetAssetsTrackingConfig { config: *config }.to_vec()?;
+        let accounts = vec![
+            AccountMeta::new_readonly(*admin_address, true),
+            AccountMeta::new_readonly(fund_ref, false),
+            AccountMeta::new(fund.info_account, false),
+        ];
+
+        Ok(Instruction {
+            program_id: fund.fund_program_id,
+            data,
+            accounts,
+        })
+    }
+
+    /// Creates a new set deposit schedule Instruction
+    pub fn new_instruction_set_fund_deposit_schedule(
+        &self,
+        admin_address: &Pubkey,
+        fund_name: &str,
+        schedule: &FundSchedule,
+    ) -> Result<Instruction, FarmClientError> {
+        // get fund info
+        let fund = self.get_fund(fund_name)?;
+        let fund_ref = self.get_fund_ref(fund_name)?;
+
+        // fill in accounts and instruction data
+        let data = FundInstruction::SetDepositSchedule {
+            schedule: *schedule,
+        }
+        .to_vec()?;
+        let accounts = vec![
+            AccountMeta::new_readonly(*admin_address, true),
+            AccountMeta::new_readonly(fund_ref, false),
+            AccountMeta::new(fund.info_account, false),
+        ];
+
+        Ok(Instruction {
+            program_id: fund.fund_program_id,
+            data,
+            accounts,
+        })
+    }
+
+    /// Creates a new Instruction for adding a new custody to the Fund
+    pub fn new_instruction_add_fund_custody(
+        &self,
+        admin_address: &Pubkey,
+        fund_name: &str,
+        token_name: &str,
+    ) -> Result<Instruction, FarmClientError> {
+        // get fund info
+        let fund = self.get_fund(fund_name)?;
+        let fund_ref = self.get_fund_ref(fund_name)?;
+        let token = self.get_token(token_name)?;
+        let token_ref = self.get_token_ref(token_name)?;
+
+        // get custodies
+        let custodies = self.get_fund_custodies(fund_name)?;
+        let custody_metadata = self.get_fund_custody_account(fund_name, token_name)?;
+        let fund_assets_account =
+            self.get_fund_assets_account(fund_name, FundAssetType::Custody)?;
+        let custody_token_account = self.get_fund_custody_token_account(fund_name, token_name)?;
+        let custody_fees_token_account =
+            self.get_fund_custody_fees_token_account(fund_name, token_name)?;
+        let pyth_price_info =
+            self.get_oracle_price_account(&(token_name.to_string() + "/USD"), OracleType::Pyth)?;
+
+        // instruction params
+        let custody_id = if custodies.is_empty() {
+            0
+        } else if custodies.last().unwrap().custody_id < u32::MAX {
+            custodies.last().unwrap().custody_id + 1
+        } else {
+            return Err(FarmClientError::ValueError(
+                "Number of custodies are over the limit".to_string(),
+            ));
+        };
+
+        let current_hash = self
+            .get_fund_assets(fund_name, FundAssetType::Custody)?
+            .current_hash;
+        let mut hasher = Hasher::default();
+        let mut input = current_hash.to_le_bytes().to_vec();
+        input.extend_from_slice(custody_metadata.as_ref());
+        hasher.hash(input.as_slice());
+        let hash = hasher.result();
+        let target_hash = u64::from_le_bytes(*array_ref!(hash.as_ref(), 0, 8));
+
+        // fill in accounts and instruction data
+        let data = FundInstruction::AddCustody {
+            target_hash,
+            custody_id,
+        }
+        .to_vec()?;
+        let accounts = vec![
+            AccountMeta::new_readonly(*admin_address, true),
+            AccountMeta::new_readonly(fund_ref, false),
+            AccountMeta::new(fund.info_account, false),
+            AccountMeta::new(fund.fund_authority, false),
+            AccountMeta::new_readonly(system_program::id(), false),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new_readonly(sysvar::rent::id(), false),
+            AccountMeta::new(fund_assets_account, false),
+            AccountMeta::new(custody_token_account, false),
+            AccountMeta::new(custody_fees_token_account, false),
+            AccountMeta::new(custody_metadata, false),
+            AccountMeta::new_readonly(token_ref, false),
+            AccountMeta::new(token.mint, false),
+            AccountMeta::new_readonly(pyth_price_info, false),
+        ];
+
+        Ok(Instruction {
+            program_id: fund.fund_program_id,
+            data,
+            accounts,
+        })
+    }
+
+    /// Creates a new Instruction for requesting deposit to the Fund
+    pub fn new_instruction_request_deposit_fund(
+        &self,
+        wallet_address: &Pubkey,
+        fund_name: &str,
+        token_name: &str,
+        ui_amount: f64,
+    ) -> Result<Instruction, FarmClientError> {
+        // get fund info
+        let fund = self.get_fund(fund_name)?;
+        let fund_ref = self.get_fund_ref(fund_name)?;
+        let fund_token = self.get_token_by_ref(&fund.fund_token_ref)?;
+        let token = self.get_token(token_name)?;
+        let token_ref = self.get_token_ref(token_name)?;
+        let user_info_account =
+            self.get_fund_user_info_account(wallet_address, fund_name, token_name)?;
+        let user_deposit_token_account =
+            self.get_associated_token_address(wallet_address, token.name.as_str())?;
+        let user_fund_token_account =
+            self.get_associated_token_address(wallet_address, fund_token.name.as_str())?;
+        let custody_metadata = self.get_fund_custody_account(fund_name, token_name)?;
+        let custody_token_account = self.get_fund_custody_token_account(fund_name, token_name)?;
+        let custody_fees_token_account =
+            self.get_fund_custody_fees_token_account(fund_name, token_name)?;
+        let pyth_price_info =
+            self.get_oracle_price_account(&(token_name.to_string() + "/USD"), OracleType::Pyth)?;
+
+        // fill in accounts and instruction data
+        let data = FundInstruction::RequestDeposit {
+            amount: self.to_token_amount(ui_amount, &token),
+        }
+        .to_vec()?;
+        let accounts = vec![
+            AccountMeta::new_readonly(*wallet_address, true),
+            AccountMeta::new_readonly(fund_ref, false),
+            AccountMeta::new(fund.info_account, false),
+            AccountMeta::new(fund.fund_authority, false),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new(fund_token.mint, false),
+            AccountMeta::new(user_info_account, false),
+            AccountMeta::new(user_deposit_token_account, false),
+            AccountMeta::new(user_fund_token_account, false),
+            AccountMeta::new(custody_token_account, false),
+            AccountMeta::new(custody_fees_token_account, false),
+            AccountMeta::new(custody_metadata, false),
+            AccountMeta::new_readonly(token_ref, false),
+            AccountMeta::new_readonly(pyth_price_info, false),
+        ];
+
+        Ok(Instruction {
+            program_id: fund.fund_program_id,
+            data,
+            accounts,
+        })
+    }
+
+    /// Creates a new Instruction for canceling pending deposit to the Fund
+    pub fn new_instruction_cancel_deposit_fund(
+        &self,
+        wallet_address: &Pubkey,
+        fund_name: &str,
+        token_name: &str,
+    ) -> Result<Instruction, FarmClientError> {
+        // get fund info
+        let fund = self.get_fund(fund_name)?;
+        let fund_ref = self.get_fund_ref(fund_name)?;
+        let token = self.get_token(token_name)?;
+        let token_ref = self.get_token_ref(token_name)?;
+        let user_info_account =
+            self.get_fund_user_info_account(wallet_address, fund_name, token_name)?;
+        let user_deposit_token_account =
+            self.get_associated_token_address(wallet_address, token.name.as_str())?;
+
+        // fill in accounts and instruction data
+        let data = FundInstruction::CancelDeposit.to_vec()?;
+        let accounts = vec![
+            AccountMeta::new_readonly(*wallet_address, true),
+            AccountMeta::new_readonly(fund_ref, false),
+            AccountMeta::new(fund.info_account, false),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new(user_info_account, false),
+            AccountMeta::new(user_deposit_token_account, false),
+            AccountMeta::new_readonly(token_ref, false),
+        ];
+
+        Ok(Instruction {
+            program_id: fund.fund_program_id,
+            data,
+            accounts,
+        })
+    }
+
+    /// Creates a new Instruction for approving deposit to the Fund
+    pub fn new_instruction_approve_deposit_fund(
+        &self,
+        admin_address: &Pubkey,
+        user_address: &Pubkey,
+        fund_name: &str,
+        token_name: &str,
+        ui_amount: f64,
+    ) -> Result<Instruction, FarmClientError> {
+        // get fund info
+        let fund = self.get_fund(fund_name)?;
+        let fund_ref = self.get_fund_ref(fund_name)?;
+        let fund_token = self.get_token_by_ref(&fund.fund_token_ref)?;
+        let token = self.get_token(token_name)?;
+        let token_ref = self.get_token_ref(token_name)?;
+        let user_info_account =
+            self.get_fund_user_info_account(user_address, fund_name, token_name)?;
+        let user_deposit_token_account =
+            self.get_associated_token_address(user_address, token.name.as_str())?;
+        let user_fund_token_account =
+            self.get_associated_token_address(user_address, fund_token.name.as_str())?;
+        let custody_metadata = self.get_fund_custody_account(fund_name, token_name)?;
+        let custody_token_account = self.get_fund_custody_token_account(fund_name, token_name)?;
+        let custody_fees_token_account =
+            self.get_fund_custody_fees_token_account(fund_name, token_name)?;
+        let pyth_price_info =
+            self.get_oracle_price_account(&(token_name.to_string() + "/USD"), OracleType::Pyth)?;
+
+        // fill in accounts and instruction data
+        let data = FundInstruction::ApproveDeposit {
+            amount: self.to_token_amount(ui_amount, &token),
+        }
+        .to_vec()?;
+        let accounts = vec![
+            AccountMeta::new_readonly(*admin_address, true),
+            AccountMeta::new_readonly(fund_ref, false),
+            AccountMeta::new(fund.info_account, false),
+            AccountMeta::new(fund.fund_authority, false),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new(fund_token.mint, false),
+            AccountMeta::new_readonly(*user_address, false),
+            AccountMeta::new(user_info_account, false),
+            AccountMeta::new(user_deposit_token_account, false),
+            AccountMeta::new(user_fund_token_account, false),
+            AccountMeta::new(custody_token_account, false),
+            AccountMeta::new(custody_fees_token_account, false),
+            AccountMeta::new(custody_metadata, false),
+            AccountMeta::new_readonly(token_ref, false),
+            AccountMeta::new_readonly(pyth_price_info, false),
+        ];
+
+        Ok(Instruction {
+            program_id: fund.fund_program_id,
+            data,
+            accounts,
+        })
+    }
+}

@@ -33,63 +33,63 @@ pub enum VaultInstruction {
     UnlockLiquidity { amount: u64 },
 
     /// Remove liquidity from the Vault
-    /// # Account references are protocol specific,
-    ///   see particular Router instructions handlers for more info
+    /// # Account references are strategy specific,
+    ///   see particular Vault instructions handlers for more info
     RemoveLiquidity { amount: u64 },
 
     /// Set minimum crank interval for the Vault
-    /// # Account references are protocol specific,
-    ///   see particular Router instructions handlers for more info
+    /// # Account references are strategy specific,
+    ///   see particular Vault instructions handlers for more info
     SetMinCrankInterval { min_crank_interval: u32 },
 
     /// Set fee for the Vault
-    /// # Account references are protocol specific,
-    ///   see particular Router instructions handlers for more info
+    /// # Account references are strategy specific,
+    ///   see particular Vault instructions handlers for more info
     SetFee { fee: f32 },
 
     /// Set underlying protocol fee for the Vault
-    /// # Account references are protocol specific,
-    ///   see particular Router instructions handlers for more info
+    /// # Account references are strategy specific,
+    ///   see particular Vault instructions handlers for more info
     SetExternalFee { external_fee: f32 },
 
     /// Disable new deposits to the Vault
-    /// # Account references are protocol specific,
-    ///   see particular Router instructions handlers for more info
+    /// # Account references are strategy specific,
+    ///   see particular Vault instructions handlers for more info
     DisableDeposit,
 
     /// Allow new deposits to the Vault
-    /// # Account references are protocol specific,
-    ///   see particular Router instructions handlers for more info
+    /// # Account references are strategy specific,
+    ///   see particular Vault instructions handlers for more info
     EnableDeposit,
 
     /// Disable withdrawals from the Vault
-    /// # Account references are protocol specific,
-    ///   see particular Router instructions handlers for more info
+    /// # Account references are strategy specific,
+    ///   see particular Vault instructions handlers for more info
     DisableWithdrawal,
 
     /// Allow withdrawals from the Vault
-    /// # Account references are protocol specific,
-    ///   see particular Router instructions handlers for more info
+    /// # Account references are strategy specific,
+    ///   see particular Vault instructions handlers for more info
     EnableWithdrawal,
 
     /// Run crank operation on the Vault
-    /// # Account references are protocol specific,
-    ///   see particular Router instructions handlers for more info
+    /// # Account references are strategy specific,
+    ///   see particular Vault instructions handlers for more info
     Crank { step: u64 },
 
     /// Initialize the Vault
-    /// # Account references are protocol specific,
-    ///   see particular Router instructions handlers for more info
+    /// # Account references are strategy specific,
+    ///   see particular Vault instructions handlers for more info
     Init { step: u64 },
 
     /// Shutdown the Vault
-    /// # Account references are protocol specific,
-    ///   see particular Router instructions handlers for more info
+    /// # Account references are strategy specific,
+    ///   see particular Vault instructions handlers for more info
     Shutdown,
 
     /// Withdraw collected fees
-    /// # Account references are protocol specific,
-    ///   see particular Router instructions handlers for more info
+    /// # Account references are strategy specific,
+    ///   see particular Vault instructions handlers for more info
     WithdrawFees { amount: u64 },
 }
 

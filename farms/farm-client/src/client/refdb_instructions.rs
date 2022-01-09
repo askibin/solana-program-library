@@ -4,6 +4,7 @@ use {
     crate::error::FarmClientError,
     solana_farm_sdk::{
         farm::Farm,
+        fund::Fund,
         id::{main_router, ProgramIDType},
         instruction::{main_router::MainInstruction, refdb::RefDbInstruction},
         pool::Pool,
@@ -196,6 +197,61 @@ impl FarmClient {
                 reference: refdb::Reference::Empty,
             },
         )
+    }
+
+    /// Creates a new Instruction for recording Fund's metadata on-chain
+    pub fn new_instruction_add_fund(
+        &self,
+        admin_address: &Pubkey,
+        fund: Fund,
+    ) -> Result<Instruction, FarmClientError> {
+        // fill in accounts and instruction data
+        let mut inst = Instruction {
+            program_id: main_router::id(),
+            data: Vec::<u8>::new(),
+            accounts: vec![
+                AccountMeta::new_readonly(*admin_address, true),
+                AccountMeta::new(
+                    find_refdb_pda(&refdb::StorageType::Fund.to_string()).0,
+                    false,
+                ),
+                AccountMeta::new(
+                    find_target_pda(refdb::StorageType::Fund, &fund.name).0,
+                    false,
+                ),
+                AccountMeta::new_readonly(system_program::id(), false),
+            ],
+        };
+        inst.data = MainInstruction::AddFund { fund }.to_vec()?;
+
+        Ok(inst)
+    }
+
+    /// Creates a new Instruction for removing Fund's on-chain metadata
+    pub fn new_instruction_remove_fund(
+        &self,
+        admin_address: &Pubkey,
+        fund_name: &str,
+    ) -> Result<Instruction, FarmClientError> {
+        // fill in accounts and instruction data
+        let name = str_to_as64(fund_name)?;
+        let mut inst = Instruction {
+            program_id: main_router::id(),
+            data: Vec::<u8>::new(),
+            accounts: vec![
+                AccountMeta::new_readonly(*admin_address, true),
+                AccountMeta::new(
+                    find_refdb_pda(&refdb::StorageType::Fund.to_string()).0,
+                    false,
+                ),
+                AccountMeta::new(find_target_pda(refdb::StorageType::Fund, &name).0, false),
+                AccountMeta::new_readonly(system_program::id(), false),
+            ],
+        };
+
+        inst.data = MainInstruction::RemoveFund { name }.to_vec()?;
+
+        Ok(inst)
     }
 
     /// Creates a new Instruction for recording Vault's metadata on-chain

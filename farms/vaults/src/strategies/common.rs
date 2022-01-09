@@ -1,13 +1,16 @@
 //! Common functions
 
 use {
+    crate::vault_info::VaultInfo,
     solana_farm_sdk::{
         id::zero,
+        program::clock,
         vault::{Vault, VaultStrategy},
     },
     solana_program::{
         account_info::AccountInfo, entrypoint::ProgramResult, msg, program_error::ProgramError,
     },
+    std::cmp,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -59,4 +62,24 @@ pub fn check_custody_accounts<'a, 'b>(
         return Err(ProgramError::InvalidArgument);
     }
     Ok(())
+}
+
+pub fn check_min_crank_interval(vault_info: &VaultInfo) -> ProgramResult {
+    let min_crank_interval = vault_info.get_min_crank_interval()?;
+    if min_crank_interval == 0 {
+        return Ok(());
+    }
+    let last_crank_time = vault_info.get_crank_time()?;
+    let cur_time = cmp::max(clock::get_time()?, last_crank_time);
+    if cur_time < last_crank_time.wrapping_add(min_crank_interval) {
+        msg!(
+            "Error: Too early, please wait for the additional {} sec",
+            last_crank_time
+                .wrapping_add(min_crank_interval)
+                .wrapping_sub(cur_time)
+        );
+        Err(ProgramError::Custom(309))
+    } else {
+        Ok(())
+    }
 }

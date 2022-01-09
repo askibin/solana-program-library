@@ -3,6 +3,7 @@
 use {
     crate::{
         farm::Farm,
+        fund::Fund,
         instruction::refdb::RefDbInstruction,
         pack::{check_data_len, pack_array_string64, unpack_array_string64},
         pool::Pool,
@@ -17,6 +18,24 @@ use {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MainInstruction {
+    /// Record Fund's metadata on-chain
+    ///
+    /// # Account references
+    ///   0. [SIGNER] Funding account, must be main router admin
+    ///   1. [WRITE] Fund's RefDB index PDA
+    ///   2. [WRITE] Fund's RefDB data PDA
+    ///   3. [] Sytem program
+    AddFund { fund: Fund },
+
+    /// Delete Fund's metadata
+    ///
+    /// # Account references
+    ///   0. [SIGNER] Funding account, must be main router admin
+    ///   1. [WRITE] Fund's RefDB index PDA
+    ///   2. [WRITE] Fund's RefDB data PDA
+    ///   3. [] Sytem program
+    RemoveFund { name: ArrayString64 },
+
     /// Record Vault's metadata on-chain
     ///
     /// # Account references
@@ -99,6 +118,8 @@ pub enum MainInstruction {
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, TryFromPrimitive)]
 pub enum MainInstructionType {
+    AddFund,
+    RemoveFund,
     AddVault,
     RemoveVault,
     AddPool,
@@ -112,6 +133,7 @@ pub enum MainInstructionType {
 
 impl MainInstruction {
     pub const MAX_LEN: usize = MainInstruction::max(Vault::MAX_LEN + 1, Pool::MAX_LEN + 1);
+    pub const REMOVE_FUND_LEN: usize = 65;
     pub const REMOVE_VAULT_LEN: usize = 65;
     pub const REMOVE_POOL_LEN: usize = 65;
     pub const REMOVE_FARM_LEN: usize = 65;
@@ -124,6 +146,8 @@ impl MainInstruction {
     pub fn pack(&self, output: &mut [u8]) -> Result<usize, ProgramError> {
         check_data_len(output, 1)?;
         match self {
+            Self::AddFund { fund } => self.pack_add_fund(output, fund),
+            Self::RemoveFund { name } => self.pack_remove_fund(output, name),
             Self::AddVault { vault } => self.pack_add_vault(output, vault),
             Self::RemoveVault { name } => self.pack_remove_vault(output, name),
             Self::AddPool { pool } => self.pack_add_pool(output, pool),
@@ -152,6 +176,8 @@ impl MainInstruction {
         let instruction_type = MainInstructionType::try_from_primitive(input[0])
             .or(Err(ProgramError::InvalidInstructionData))?;
         match instruction_type {
+            MainInstructionType::AddFund => MainInstruction::unpack_add_fund(input),
+            MainInstructionType::RemoveFund => MainInstruction::unpack_remove_fund(input),
             MainInstructionType::AddVault => MainInstruction::unpack_add_vault(input),
             MainInstructionType::RemoveVault => MainInstruction::unpack_remove_vault(input),
             MainInstructionType::AddPool => MainInstruction::unpack_add_pool(input),
@@ -164,6 +190,30 @@ impl MainInstruction {
                 MainInstruction::unpack_refdb_instruction(input)
             }
         }
+    }
+
+    fn pack_add_fund(&self, output: &mut [u8], fund: &Fund) -> Result<usize, ProgramError> {
+        let packed = fund.pack(&mut output[1..])?;
+        let instruction_type_out = array_mut_ref![output, 0, 1];
+        instruction_type_out[0] = MainInstructionType::AddFund as u8;
+
+        Ok(packed + 1)
+    }
+
+    fn pack_remove_fund(
+        &self,
+        output: &mut [u8],
+        name: &ArrayString64,
+    ) -> Result<usize, ProgramError> {
+        check_data_len(output, MainInstruction::REMOVE_FUND_LEN)?;
+
+        let output = array_mut_ref![output, 0, MainInstruction::REMOVE_FUND_LEN];
+        let (instruction_type_out, name_out) = mut_array_refs![output, 1, 64];
+
+        instruction_type_out[0] = MainInstructionType::RemoveFund as u8;
+        pack_array_string64(name, name_out);
+
+        Ok(MainInstruction::REMOVE_FUND_LEN)
     }
 
     fn pack_add_vault(&self, output: &mut [u8], vault: &Vault) -> Result<usize, ProgramError> {
@@ -274,6 +324,19 @@ impl MainInstruction {
         Ok(packed + 1)
     }
 
+    fn unpack_add_fund(input: &[u8]) -> Result<MainInstruction, ProgramError> {
+        let fund = Fund::unpack(&input[1..])?;
+        Ok(Self::AddFund { fund })
+    }
+
+    fn unpack_remove_fund(input: &[u8]) -> Result<MainInstruction, ProgramError> {
+        check_data_len(input, MainInstruction::REMOVE_FUND_LEN)?;
+        let input = array_ref![input, 1, MainInstruction::REMOVE_FUND_LEN - 1];
+        Ok(Self::RemoveFund {
+            name: unpack_array_string64(input)?,
+        })
+    }
+
     fn unpack_add_vault(input: &[u8]) -> Result<MainInstruction, ProgramError> {
         let vault = Vault::unpack(&input[1..])?;
         Ok(Self::AddVault { vault })
@@ -335,6 +398,8 @@ impl MainInstruction {
 impl std::fmt::Display for MainInstructionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
+            MainInstructionType::AddFund => write!(f, "AddFund"),
+            MainInstructionType::RemoveFund => write!(f, "RemoveFund"),
             MainInstructionType::AddVault => write!(f, "AddVault"),
             MainInstructionType::RemoveVault => write!(f, "RemoveVault"),
             MainInstructionType::AddPool => write!(f, "AddPool"),

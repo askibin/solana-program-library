@@ -53,6 +53,18 @@ where
     }
 }
 
+pub fn checked_pow<T>(arg: T, exp: usize) -> Result<T, ProgramError>
+where
+    T: num_traits::PrimInt + Display,
+{
+    if let Some(res) = num_traits::checked_pow(arg, exp) {
+        Ok(res)
+    } else {
+        msg!("Error: Overflow in {} ^ {}", arg, exp);
+        Err(ProgramError::Custom(999))
+    }
+}
+
 pub fn checked_as_u64<T>(arg: T) -> Result<u64, ProgramError>
 where
     T: Display + num_traits::ToPrimitive + Clone,

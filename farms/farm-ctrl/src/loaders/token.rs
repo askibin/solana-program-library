@@ -74,7 +74,7 @@ fn load_solana_tokens(
         let name = if is_saber && token_type == TokenType::LpToken {
             "LP.SBR.".to_string()
                 + &normalize_name(git_token.name.split(' ').collect::<Vec<&str>>()[0], true)
-        } else if token_type == TokenType::VtToken {
+        } else if token_type == TokenType::VtToken || token_type == TokenType::FundToken {
             git_token.symbol
         } else {
             normalize_name(&git_token.symbol, false)
@@ -264,6 +264,8 @@ fn get_token_type_from_tags(tags: &[String]) -> TokenType {
         TokenType::LpToken
     } else if tags.contains(&String::from("vt-token")) {
         TokenType::VtToken
+    } else if tags.contains(&String::from("fund-token")) {
+        TokenType::FundToken
     } else {
         TokenType::SplToken
     }

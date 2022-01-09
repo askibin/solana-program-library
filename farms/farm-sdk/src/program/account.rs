@@ -2,7 +2,7 @@
 
 use {
     crate::{math, pack::check_data_len},
-    arrayref::array_ref,
+    arrayref::{array_ref, array_refs},
     solana_program::{
         account_info::AccountInfo, entrypoint::ProgramResult, msg, program::invoke,
         program_error::ProgramError, program_pack::Pack, pubkey::Pubkey,
@@ -59,6 +59,21 @@ pub fn get_token_account_mint(token_account: &AccountInfo) -> Result<Pubkey, Pro
     let mint = array_ref![data, 0, 32];
 
     Ok(Pubkey::new_from_array(*mint))
+}
+
+/// Returns Mint authority.
+/// Extrats authority field without unpacking entire struct.
+pub fn get_mint_authority(token_mint: &AccountInfo) -> Result<Option<Pubkey>, ProgramError> {
+    let data = token_mint.try_borrow_data()?;
+    check_data_len(&data, spl_token::state::Mint::get_packed_len())?;
+
+    let data = array_ref![data, 0, 36];
+    let (tag, authority) = array_refs![data, 4, 32];
+    match *tag {
+        [0, 0, 0, 0] => Ok(None),
+        [1, 0, 0, 0] => Ok(Some(Pubkey::new_from_array(*authority))),
+        _ => Err(ProgramError::InvalidAccountData),
+    }
 }
 
 pub fn get_balance_increase(
@@ -160,7 +175,7 @@ pub fn get_token_ratio<'a, 'b>(
     )
 }
 
-/// Returns token pair ratio, uses decimals insted of mints, optimized for on-chain.
+/// Returns token pair ratio, uses decimals insted of mints
 pub fn get_token_ratio_with_decimals(
     token_a_balance: u64,
     token_b_balance: u64,
@@ -171,22 +186,8 @@ pub fn get_token_ratio_with_decimals(
         return Ok(0.0);
     }
 
-    let mut ratio = token_b_balance as f64 / token_a_balance as f64;
-    match token_a_decimals.cmp(&token_b_decimals) {
-        Ordering::Greater => {
-            for _ in 0..(token_a_decimals - token_b_decimals) {
-                ratio *= 10.0;
-            }
-        }
-        Ordering::Less => {
-            for _ in 0..(token_b_decimals - token_a_decimals) {
-                ratio /= 10.0;
-            }
-        }
-        Ordering::Equal => {}
-    }
-
-    Ok(ratio)
+    Ok(token_b_balance as f64 / token_a_balance as f64
+        * f64::powi(10.0, token_a_decimals as i32 - token_b_decimals as i32))
 }
 
 /// Returns token pair ratio
@@ -289,6 +290,46 @@ pub fn burn_tokens<'a, 'b>(
             authority_account.clone(),
         ],
     )
+}
+
+pub fn approve_delegate<'a, 'b>(
+    source_account: &'a AccountInfo<'b>,
+    delegate_account: &'a AccountInfo<'b>,
+    authority_account: &'a AccountInfo<'b>,
+    amount: u64,
+) -> ProgramResult {
+    invoke(
+        &spl_token::instruction::approve(
+            &spl_token::id(),
+            source_account.key,
+            delegate_account.key,
+            authority_account.key,
+            &[],
+            amount,
+        )?,
+        &[
+            source_account.clone(),
+            delegate_account.clone(),
+            authority_account.clone(),
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn revoke_delegate<'a, 'b>(
+    source_account: &'a AccountInfo<'b>,
+    authority_account: &'a AccountInfo<'b>,
+) -> ProgramResult {
+    invoke(
+        &spl_token::instruction::revoke(
+            &spl_token::id(),
+            source_account.key,
+            authority_account.key,
+            &[],
+        )?,
+        &[source_account.clone(), authority_account.clone()],
+    )?;
+    Ok(())
 }
 
 pub fn close_system_account<'a, 'b>(

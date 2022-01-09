@@ -311,7 +311,7 @@ impl<'a, 'b> UserInfo<'a, 'b> {
                     if let Ok(key) = Pubkey::create_program_address(
                         &[
                             b"user_info_account",
-                            &user_account.to_bytes()[..],
+                            user_account.as_ref(),
                             vault.name.as_bytes(),
                             &[data as u8],
                         ],

@@ -25,7 +25,7 @@ impl UserInit for VaultInstruction {
                 msg!("Create user info account");
                 let seeds: &[&[u8]] = &[
                     b"user_info_account",
-                    &user_account.key.to_bytes()[..],
+                    &user_account.key.as_ref(),
                     vault.name.as_bytes(),
                 ];
                 let bump = Pubkey::find_program_address(seeds, &vault.vault_program_id).1;

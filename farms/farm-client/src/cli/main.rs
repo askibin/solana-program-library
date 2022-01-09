@@ -155,6 +155,21 @@ fn main() {
             let user_info = client.get_vault_user_info(&wallet, &object).unwrap();
             printer::print_object(&config, &account, &user_info);
         }
+        ("fund-info", Some(subcommand_matches)) => {
+            let object = config::get_str_val(subcommand_matches, "fund_name");
+            let fund = client.get_fund(&object).unwrap();
+            let fund_info = client.get_fund_info(&object).unwrap();
+            printer::print_object(&config, &fund.info_account, &fund_info);
+        }
+        ("fund-user-info", Some(subcommand_matches)) => {
+            let object = config::get_str_val(subcommand_matches, "fund_name");
+            let token = config::get_str_val(subcommand_matches, "token_name");
+            let account = client
+                .get_fund_user_info_account(&wallet, &object, &token)
+                .unwrap();
+            let user_info = client.get_fund_user_info(&wallet, &object, &token).unwrap();
+            printer::print_object(&config, &account, &user_info);
+        }
         ("find-pools", Some(subcommand_matches)) => {
             let protocol = config::get_str_val(subcommand_matches, "protocol");
             let token1 = config::get_str_val(subcommand_matches, "token_name");
