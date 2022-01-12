@@ -3,7 +3,7 @@
 use {
     crate::fund_info::FundInfo,
     solana_farm_sdk::{
-        fund::{Fund, FundAssets, FundCustody, DISCRIMINATOR_FUND_CUSTODY},
+        fund::{Fund, FundAssets, FundCustody, FundCustodyType, DISCRIMINATOR_FUND_CUSTODY},
         instruction::fund::FundInstruction,
         program::{clock, pda},
         token::Token,
@@ -19,6 +19,7 @@ pub fn add_custody(
     accounts: &[AccountInfo],
     target_hash: u64,
     custody_id: u32,
+    custody_type: FundCustodyType,
 ) -> ProgramResult {
     //#[allow(clippy::deprecated_cfg_attr)]
     //#[cfg_attr(rustfmt, rustfmt_skip)]
@@ -45,8 +46,13 @@ pub fn add_custody(
                 msg!("Failed to load custody token metadata");
                 return Err(ProgramError::InvalidAccountData);
             };
+        let custody_seed_str: &[u8] = match custody_type {
+            FundCustodyType::DepositWithdraw => b"fund_wd_custody_info",
+            FundCustodyType::Trading => b"fund_trading_custody_info",
+            _ => unreachable!(),
+        };
         let custody_seeds = &[
-            b"fund_custody_info",
+            custody_seed_str,
             custody_token.name.as_bytes(),
             fund.name.as_bytes(),
         ];
@@ -64,6 +70,7 @@ pub fn add_custody(
             discriminator: DISCRIMINATOR_FUND_CUSTODY,
             fund_ref: *fund_metadata.key,
             custody_id,
+            custody_type,
             token_ref: *custody_token_metadata.key,
             address: *custody_account.key,
             fees_address: *custody_fees_account.key,
@@ -76,6 +83,11 @@ pub fn add_custody(
 
         // init token accounts
         msg!("Init custody token account");
+        let custody_seed_str: &[u8] = match custody_type {
+            FundCustodyType::DepositWithdraw => b"fund_wd_custody_account",
+            FundCustodyType::Trading => b"fund_trading_custody_account",
+            _ => unreachable!(),
+        };
         pda::init_token_account(
             admin_account,
             custody_account,
@@ -84,13 +96,18 @@ pub fn add_custody(
             rent_program,
             &fund.fund_program_id,
             &[
-                b"fund_custody_account",
+                custody_seed_str,
                 custody_token.name.as_bytes(),
                 fund.name.as_bytes(),
             ],
         )?;
 
         msg!("Init fee custody token account");
+        let custody_seed_str: &[u8] = match custody_type {
+            FundCustodyType::DepositWithdraw => b"fund_wd_custody_fees_account",
+            FundCustodyType::Trading => b"fund_td_custody_fees_account",
+            _ => unreachable!(),
+        };
         pda::init_token_account(
             admin_account,
             custody_fees_account,
@@ -99,7 +116,7 @@ pub fn add_custody(
             rent_program,
             &fund.fund_program_id,
             &[
-                b"fund_custody_fees_account",
+                custody_seed_str,
                 custody_token.name.as_bytes(),
                 fund.name.as_bytes(),
             ],

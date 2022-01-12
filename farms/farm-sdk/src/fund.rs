@@ -137,11 +137,19 @@ pub struct FundAssets {
     pub cycle_end_time: UnixTimestamp,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[repr(u8)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq, TryFromPrimitive)]
+pub enum FundCustodyType {
+    DepositWithdraw,
+    Trading,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FundCustody {
     pub discriminator: u64,
     pub fund_ref: Pubkey,
     pub custody_id: u32,
+    pub custody_type: FundCustodyType,
     pub token_ref: Pubkey,
     pub address: Pubkey,
     pub fees_address: Pubkey,
@@ -432,7 +440,7 @@ impl FundAssets {
 }
 
 impl FundCustody {
-    pub const LEN: usize = 189;
+    pub const LEN: usize = 190;
 
     pub fn get_size(&self) -> usize {
         Self::LEN
@@ -447,6 +455,7 @@ impl FundCustody {
             discriminator_out,
             fund_ref_out,
             custody_id_out,
+            custody_type_out,
             token_ref_out,
             address_out,
             fees_address_out,
@@ -454,11 +463,12 @@ impl FundCustody {
             liquidation_id_out,
             liquidation_token_amount_out,
             bump_out,
-        ) = mut_array_refs![output, 8, 32, 4, 32, 32, 32, 32, 8, 8, 1];
+        ) = mut_array_refs![output, 8, 32, 4, 1, 32, 32, 32, 32, 8, 8, 1];
 
         *discriminator_out = self.discriminator.to_le_bytes();
         fund_ref_out.copy_from_slice(self.fund_ref.as_ref());
         *custody_id_out = self.custody_id.to_le_bytes();
+        custody_type_out[0] = self.custody_type as u8;
         token_ref_out.copy_from_slice(self.token_ref.as_ref());
         address_out.copy_from_slice(self.address.as_ref());
         fees_address_out.copy_from_slice(self.fees_address.as_ref());
@@ -488,6 +498,7 @@ impl FundCustody {
             discriminator,
             fund_ref,
             custody_id,
+            custody_type,
             token_ref,
             address,
             fees_address,
@@ -495,12 +506,14 @@ impl FundCustody {
             liquidation_id,
             liquidation_token_amount,
             bump,
-        ) = array_refs![input, 8, 32, 4, 32, 32, 32, 32, 8, 8, 1];
+        ) = array_refs![input, 8, 32, 4, 1, 32, 32, 32, 32, 8, 8, 1];
 
         Ok(Self {
             discriminator: u64::from_le_bytes(*discriminator),
             fund_ref: Pubkey::new_from_array(*fund_ref),
             custody_id: u32::from_le_bytes(*custody_id),
+            custody_type: FundCustodyType::try_from_primitive(custody_type[0])
+                .or(Err(ProgramError::InvalidAccountData))?,
             token_ref: Pubkey::new_from_array(*token_ref),
             address: Pubkey::new_from_array(*address),
             fees_address: Pubkey::new_from_array(*fees_address),

@@ -144,8 +144,7 @@ pub fn close_token_account<'a, 'b>(
             authority_account.clone(),
         ],
         &[&[seeds, &[&[bump]]].concat()],
-    )?;
-    Ok(())
+    )
 }
 
 pub fn transfer_tokens_with_seeds<'a, 'b>(
@@ -289,8 +288,7 @@ pub fn mint_to_with_seeds<'a, 'b>(
             mint_authority_account.clone(),
         ],
         seeds,
-    )?;
-    Ok(())
+    )
 }
 
 pub fn mint_to<'a, 'b>(
@@ -309,6 +307,82 @@ pub fn mint_to<'a, 'b>(
         mint_authority_account,
         &[&[seeds, &[&[bump]]].concat()],
         amount,
+    )
+}
+
+pub fn approve_delegate_with_seeds<'a, 'b>(
+    source_account: &'a AccountInfo<'b>,
+    delegate_account: &'a AccountInfo<'b>,
+    authority_account: &'a AccountInfo<'b>,
+    seeds: &[&[&[u8]]],
+    amount: u64,
+) -> ProgramResult {
+    solana_program::program::invoke_signed(
+        &spl_token::instruction::approve(
+            &spl_token::id(),
+            source_account.key,
+            delegate_account.key,
+            authority_account.key,
+            &[],
+            amount,
+        )?,
+        &[
+            source_account.clone(),
+            delegate_account.clone(),
+            authority_account.clone(),
+        ],
+        seeds,
+    )
+}
+
+pub fn approve_delegate<'a, 'b>(
+    source_account: &'a AccountInfo<'b>,
+    delegate_account: &'a AccountInfo<'b>,
+    authority_account: &'a AccountInfo<'b>,
+    base_address: &Pubkey,
+    seeds: &[&[u8]],
+    amount: u64,
+) -> ProgramResult {
+    let (_, bump) = Pubkey::find_program_address(seeds, base_address);
+
+    approve_delegate_with_seeds(
+        source_account,
+        delegate_account,
+        authority_account,
+        &[&[seeds, &[&[bump]]].concat()],
+        amount,
+    )
+}
+
+pub fn revoke_delegate_with_seeds<'a, 'b>(
+    source_account: &'a AccountInfo<'b>,
+    authority_account: &'a AccountInfo<'b>,
+    seeds: &[&[&[u8]]],
+) -> ProgramResult {
+    solana_program::program::invoke_signed(
+        &spl_token::instruction::revoke(
+            &spl_token::id(),
+            source_account.key,
+            authority_account.key,
+            &[],
+        )?,
+        &[source_account.clone(), authority_account.clone()],
+        seeds,
+    )
+}
+
+pub fn revoke_delegate<'a, 'b>(
+    source_account: &'a AccountInfo<'b>,
+    authority_account: &'a AccountInfo<'b>,
+    base_address: &Pubkey,
+    seeds: &[&[u8]],
+) -> ProgramResult {
+    let (_, bump) = Pubkey::find_program_address(seeds, base_address);
+
+    revoke_delegate_with_seeds(
+        source_account,
+        authority_account,
+        &[&[seeds, &[&[bump]]].concat()],
     )
 }
 

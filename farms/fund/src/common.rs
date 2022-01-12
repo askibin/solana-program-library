@@ -4,7 +4,7 @@ use {
     crate::fund_info::FundInfo,
     pyth_client::{CorpAction, PriceStatus, PriceType},
     solana_farm_sdk::{
-        fund::{Fund, FundCustody, FundUserInfo},
+        fund::{Fund, FundCustody, FundCustodyType, FundUserInfo},
         id::zero,
         math,
         program::{account, clock},
@@ -17,7 +17,7 @@ use {
     std::cmp,
 };
 
-pub fn check_custody_accounts<'a, 'b>(
+pub fn check_wd_custody_accounts<'a, 'b>(
     fund: &Fund,
     custody_token: &Token,
     user_deposit_token_account: &'a AccountInfo<'b>,
@@ -26,8 +26,8 @@ pub fn check_custody_accounts<'a, 'b>(
     custody_metadata: &'a AccountInfo<'b>,
     pyth_price_info: &'a AccountInfo<'b>,
 ) -> ProgramResult {
-    //if custody_metadata.owner != fund.fund_program_id
-    //    || &account::get_token_account_owner(custody_account)? != fund.fund_program_id
+    //if custody_metadata.owner != &fund.fund_program_id
+    //    || &account::get_token_account_owner(custody_account)? != &fund.fund_program_id
     //{
     //    msg!("Error: Invalid custody owner");
     //    return Err(ProgramError::IllegalOwner);
@@ -52,7 +52,9 @@ pub fn check_custody_accounts<'a, 'b>(
             msg!("Error: Invalid custody fees token account");
             return Err(ProgramError::InvalidAccountData);
         };
-    if deposit_token_mint != custody_account_mint || deposit_token_mint != custody_fees_account_mint
+    if custody_token.mint != custody_account_mint
+        || deposit_token_mint != custody_account_mint
+        || deposit_token_mint != custody_fees_account_mint
     {
         msg!("Error: Custody mint mismatch");
         return Err(ProgramError::InvalidArgument);
@@ -65,7 +67,7 @@ pub fn check_custody_accounts<'a, 'b>(
     };
     let custody_metadata_derived = Pubkey::create_program_address(
         &[
-            b"fund_custody_info",
+            b"fund_wd_custody_info",
             custody_token.name.as_bytes(),
             fund.name.as_bytes(),
             &[custody.bump],
@@ -84,6 +86,58 @@ pub fn check_custody_accounts<'a, 'b>(
     }
 }
 
+pub fn check_custody_account<'a, 'b>(
+    fund: &Fund,
+    custody_token: &Token,
+    custody_account: &'a AccountInfo<'b>,
+    custody_metadata: &'a AccountInfo<'b>,
+    custody_type: FundCustodyType,
+) -> ProgramResult {
+    //if custody_metadata.owner != &fund.fund_program_id
+    //    || &account::get_token_account_owner(custody_account)? != &fund.fund_program_id
+    //{
+    //    msg!("Error: Invalid custody owner");
+    //    return Err(ProgramError::IllegalOwner);
+    //}
+    let custody_account_mint = if let Ok(mint) = account::get_token_account_mint(custody_account) {
+        mint
+    } else {
+        msg!("Error: Invalid custody token account");
+        return Err(ProgramError::InvalidAccountData);
+    };
+    if custody_token.mint != custody_account_mint {
+        msg!("Error: Custody mint mismatch");
+        return Err(ProgramError::InvalidArgument);
+    }
+    let custody = if let Ok(custody) = FundCustody::unpack(&custody_metadata.try_borrow_data()?) {
+        custody
+    } else {
+        msg!("Failed to load custody metadata");
+        return Err(ProgramError::InvalidAccountData);
+    };
+    let custody_seed_str: &[u8] = match custody_type {
+        FundCustodyType::DepositWithdraw => b"fund_wd_custody_info",
+        FundCustodyType::Trading => b"fund_trading_custody_info",
+        _ => unreachable!(),
+    };
+    let custody_metadata_derived = Pubkey::create_program_address(
+        &[
+            custody_seed_str,
+            custody_token.name.as_bytes(),
+            fund.name.as_bytes(),
+            &[custody.bump],
+        ],
+        &fund.fund_program_id,
+    )?;
+    if &custody_metadata_derived != custody_metadata.key || &custody.address != custody_account.key
+    {
+        msg!("Error: Invalid custody accounts");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    Ok(())
+}
+
 pub fn check_user_info_account<'a, 'b>(
     fund: &Fund,
     custody_token: &Token,
@@ -91,7 +145,7 @@ pub fn check_user_info_account<'a, 'b>(
     user_account: &'a AccountInfo<'b>,
     user_info_account: &'a AccountInfo<'b>,
 ) -> ProgramResult {
-    //if user_info_account.owner != fund_program_id {
+    //if user_info_account.owner != &fund.fund_program_id {
     //    msg!("Error: Invalid user info account owner");
     //    return Err(ProgramError::IllegalOwner);
     //}
@@ -117,7 +171,7 @@ pub fn check_fund_token_mint<'a, 'b>(
     fund: &Fund,
     fund_token_mint: &'a AccountInfo<'b>,
 ) -> ProgramResult {
-    //if account::get_mint_authority(fund_token_mint)? != fund_program_id {
+    //if account::get_mint_authority(fund_token_mint)? != &fund.fund_program_id {
     //    msg!("Error: Invalid fund token mint authority");
     //    return Err(ProgramError::IllegalOwner);
     //}

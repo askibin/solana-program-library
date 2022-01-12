@@ -169,9 +169,9 @@ use {
     solana_farm_sdk::{
         farm::{Farm, FarmRoute},
         fund::{
-            Fund, FundAssetType, FundAssets, FundAssetsTrackingConfig, FundCustody, FundInfo,
-            FundSchedule, FundUserInfo, OracleType, DISCRIMINATOR_FUND_CUSTODY,
-            DISCRIMINATOR_FUND_USER_INFO,
+            Fund, FundAssetType, FundAssets, FundAssetsTrackingConfig, FundCustody,
+            FundCustodyType, FundInfo, FundSchedule, FundUserInfo, OracleType,
+            DISCRIMINATOR_FUND_CUSTODY, DISCRIMINATOR_FUND_USER_INFO,
         },
         id::{
             main_router, main_router_admin, zero, ProgramIDType, DAO_CUSTODY_NAME, DAO_MINT_NAME,
@@ -1269,13 +1269,21 @@ impl FarmClient {
             token_name
         };
         let token_address = self.get_associated_token_address(wallet_address, token_name)?;
-        let balance = self.rpc_client.get_token_account_balance(&token_address)?;
+        self.get_token_account_balance_with_address(&token_address)
+    }
+
+    /// Returns token balance for the specified token account address
+    pub fn get_token_account_balance_with_address(
+        &self,
+        token_account: &Pubkey,
+    ) -> Result<f64, FarmClientError> {
+        let balance = self.rpc_client.get_token_account_balance(&token_account)?;
         if let Some(ui_amount) = balance.ui_amount {
             Ok(ui_amount)
         } else {
             Err(FarmClientError::ParseError(format!(
-                "Failed to parse balance for token {}",
-                token_name
+                "Failed to parse balance for token address {}",
+                token_account
             )))
         }
     }
@@ -3062,12 +3070,18 @@ impl FarmClient {
         &self,
         fund_name: &str,
         token_name: &str,
+        custody_type: FundCustodyType,
     ) -> Result<Pubkey, FarmClientError> {
         let fund = self.get_fund(fund_name)?;
         let token = self.get_token(token_name)?;
+        let custody_seed_str: &[u8] = match custody_type {
+            FundCustodyType::DepositWithdraw => b"fund_wd_custody_account",
+            FundCustodyType::Trading => b"fund_trading_custody_account",
+            _ => unreachable!(),
+        };
         Ok(Pubkey::find_program_address(
             &[
-                b"fund_custody_account",
+                custody_seed_str,
                 token.name.as_bytes(),
                 fund.name.as_bytes(),
             ],
@@ -3081,12 +3095,18 @@ impl FarmClient {
         &self,
         fund_name: &str,
         token_name: &str,
+        custody_type: FundCustodyType,
     ) -> Result<Pubkey, FarmClientError> {
         let fund = self.get_fund(fund_name)?;
         let token = self.get_token(token_name)?;
+        let custody_seed_str: &[u8] = match custody_type {
+            FundCustodyType::DepositWithdraw => b"fund_wd_custody_fees_account",
+            FundCustodyType::Trading => b"fund_td_custody_fees_account",
+            _ => unreachable!(),
+        };
         Ok(Pubkey::find_program_address(
             &[
-                b"fund_custody_fees_account",
+                custody_seed_str,
                 token.name.as_bytes(),
                 fund.name.as_bytes(),
             ],
@@ -3100,12 +3120,18 @@ impl FarmClient {
         &self,
         fund_name: &str,
         token_name: &str,
+        custody_type: FundCustodyType,
     ) -> Result<Pubkey, FarmClientError> {
         let fund = self.get_fund(fund_name)?;
         let token = self.get_token(token_name)?;
+        let custody_seed_str: &[u8] = match custody_type {
+            FundCustodyType::DepositWithdraw => b"fund_wd_custody_info",
+            FundCustodyType::Trading => b"fund_trading_custody_info",
+            _ => unreachable!(),
+        };
         Ok(Pubkey::find_program_address(
             &[
-                b"fund_custody_info",
+                custody_seed_str,
                 token.name.as_bytes(),
                 fund.name.as_bytes(),
             ],
@@ -3119,8 +3145,10 @@ impl FarmClient {
         &self,
         fund_name: &str,
         token_name: &str,
+        custody_type: FundCustodyType,
     ) -> Result<FundCustody, FarmClientError> {
-        let custody_info_account = self.get_fund_custody_account(fund_name, token_name)?;
+        let custody_info_account =
+            self.get_fund_custody_account(fund_name, token_name, custody_type)?;
         let data = self.rpc_client.get_account_data(&custody_info_account)?;
         FundCustody::unpack(data.as_slice()).map_err(|e| e.into())
     }
@@ -3150,10 +3178,15 @@ impl FarmClient {
         admin_signer: &dyn Signer,
         fund_name: &str,
         token_name: &str,
+        custody_type: FundCustodyType,
     ) -> Result<Signature, FarmClientError> {
         // create and send the instruction
-        let inst =
-            self.new_instruction_add_fund_custody(&admin_signer.pubkey(), fund_name, token_name)?;
+        let inst = self.new_instruction_add_fund_custody(
+            &admin_signer.pubkey(),
+            fund_name,
+            token_name,
+            custody_type,
+        )?;
         self.sign_and_send_instructions(&[admin_signer], &[inst])
     }
 
@@ -3273,6 +3306,76 @@ impl FarmClient {
         let inst = self.new_instruction_approve_deposit_fund(
             &admin_signer.pubkey(),
             &user_address,
+            fund_name,
+            token_name,
+            ui_amount,
+        )?;
+        self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
+    /// Denies pending deposit to the Fund
+    pub fn deny_deposit_fund(
+        &self,
+        admin_signer: &dyn Signer,
+        user_address: &Pubkey,
+        fund_name: &str,
+        token_name: &str,
+        deny_reason: &str,
+    ) -> Result<Signature, FarmClientError> {
+        // create and send the instruction
+        let inst = self.new_instruction_deny_deposit_fund(
+            &admin_signer.pubkey(),
+            &user_address,
+            fund_name,
+            token_name,
+            deny_reason,
+        )?;
+        self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
+    /// Moves deposited assets from Deposit/Withdraw custody to the Fund
+    pub fn lock_assets_fund(
+        &self,
+        admin_signer: &dyn Signer,
+        fund_name: &str,
+        token_name: &str,
+        ui_amount: f64,
+    ) -> Result<Signature, FarmClientError> {
+        if ui_amount < 0.0 {
+            return Err(FarmClientError::ValueError(format!(
+                "Invalid lock amount {} specified for Fund {}: Must be greater or equal to zero.",
+                ui_amount, fund_name
+            )));
+        }
+
+        // create and send the instruction
+        let inst = self.new_instruction_lock_assets_fund(
+            &admin_signer.pubkey(),
+            fund_name,
+            token_name,
+            ui_amount,
+        )?;
+        self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
+    /// Releases assets from the Fund to Deposit/Withdraw custody
+    pub fn unlock_assets_fund(
+        &self,
+        admin_signer: &dyn Signer,
+        fund_name: &str,
+        token_name: &str,
+        ui_amount: f64,
+    ) -> Result<Signature, FarmClientError> {
+        if ui_amount < 0.0 {
+            return Err(FarmClientError::ValueError(format!(
+                "Invalid unlock amount {} specified for Fund {}: Must be greater or equal to zero.",
+                ui_amount, fund_name
+            )));
+        }
+
+        // create and send the instruction
+        let inst = self.new_instruction_unlock_assets_fund(
+            &admin_signer.pubkey(),
             fund_name,
             token_name,
             ui_amount,

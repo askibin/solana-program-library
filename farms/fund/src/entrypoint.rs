@@ -6,11 +6,13 @@ use {
     crate::{
         fund_info::FundInfo,
         instructions::{
-            add_custody::add_custody, approve_deposit::approve_deposit,
-            cancel_deposit::cancel_deposit, deny_deposit::deny_deposit, init::init,
+            /*lock_assets::lock_assets, */ add_custody::add_custody,
+            approve_deposit::approve_deposit, cancel_deposit::cancel_deposit,
+            deny_deposit::deny_deposit, init::init, lock_assets::lock_assets,
             request_deposit::request_deposit,
             set_assets_tracking_config::set_assets_tracking_config,
-            set_deposit_schedule::set_deposit_schedule, user_init::user_init,
+            set_deposit_schedule::set_deposit_schedule, unlock_assets::unlock_assets,
+            user_init::user_init,
         },
     },
     solana_farm_sdk::{
@@ -140,10 +142,10 @@ pub fn process_instruction(
             check_authority(user_account, &fund)?;
             approve_deposit(&fund, accounts, amount)?
         }
-        FundInstruction::DenyDeposit => {
+        FundInstruction::DenyDeposit { deny_reason } => {
             log_start("DenyDeposit", &fund.name);
             check_authority(user_account, &fund)?;
-            deny_deposit(&fund, accounts)?
+            deny_deposit(&fund, accounts, &deny_reason)?
         }
         FundInstruction::SetWithdrawalSchedule { schedule } => {
             log_start("SetWithdrawalSchedule", &fund.name);
@@ -157,13 +159,19 @@ pub fn process_instruction(
             log_start("ApproveWithdrawal", &fund.name);
             check_authority(user_account, &fund)?;
         }
-        FundInstruction::DenyWithdrawal => {
+        FundInstruction::DenyWithdrawal { deny_reason } => {
             log_start("DenyWithdrawal", &fund.name);
             check_authority(user_account, &fund)?;
         }
-        FundInstruction::AcceptFunds { amount } => {
-            log_start("AcceptFunds", &fund.name);
+        FundInstruction::LockAssets { amount } => {
+            log_start("LockAssets", &fund.name);
             check_authority(user_account, &fund)?;
+            lock_assets(&fund, accounts, amount)?
+        }
+        FundInstruction::UnlockAssets { amount } => {
+            log_start("UnlockAssets", &fund.name);
+            check_authority(user_account, &fund)?;
+            unlock_assets(&fund, accounts, amount)?
         }
         FundInstruction::SetAssetsTrackingConfig { config } => {
             log_start("SetAssetsTrackingConfig", &fund.name);
@@ -192,10 +200,11 @@ pub fn process_instruction(
         FundInstruction::AddCustody {
             target_hash,
             custody_id,
+            custody_type,
         } => {
             log_start("AddCustody", &fund.name);
             check_authority(user_account, &fund)?;
-            add_custody(&fund, accounts, target_hash, custody_id)?
+            add_custody(&fund, accounts, target_hash, custody_id, custody_type)?
         }
         FundInstruction::RemoveCustody => {
             log_start("RemoveCustody", &fund.name);

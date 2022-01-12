@@ -4,8 +4,11 @@ use {
     crate::error::FarmClientError,
     arrayref::array_ref,
     solana_farm_sdk::{
-        fund::{FundAssetType, FundAssetsTrackingConfig, FundSchedule, OracleType},
+        fund::{
+            FundAssetType, FundAssetsTrackingConfig, FundCustodyType, FundSchedule, OracleType,
+        },
         instruction::fund::FundInstruction,
+        string::str_to_as64,
     },
     solana_sdk::{
         hash::Hasher,
@@ -149,6 +152,7 @@ impl FarmClient {
         admin_address: &Pubkey,
         fund_name: &str,
         token_name: &str,
+        custody_type: FundCustodyType,
     ) -> Result<Instruction, FarmClientError> {
         // get fund info
         let fund = self.get_fund(fund_name)?;
@@ -158,12 +162,14 @@ impl FarmClient {
 
         // get custodies
         let custodies = self.get_fund_custodies(fund_name)?;
-        let custody_metadata = self.get_fund_custody_account(fund_name, token_name)?;
+        let custody_metadata =
+            self.get_fund_custody_account(fund_name, token_name, custody_type)?;
         let fund_assets_account =
             self.get_fund_assets_account(fund_name, FundAssetType::Custody)?;
-        let custody_token_account = self.get_fund_custody_token_account(fund_name, token_name)?;
+        let custody_token_account =
+            self.get_fund_custody_token_account(fund_name, token_name, custody_type)?;
         let custody_fees_token_account =
-            self.get_fund_custody_fees_token_account(fund_name, token_name)?;
+            self.get_fund_custody_fees_token_account(fund_name, token_name, custody_type)?;
         let pyth_price_info =
             self.get_oracle_price_account(&(token_name.to_string() + "/USD"), OracleType::Pyth)?;
 
@@ -192,6 +198,7 @@ impl FarmClient {
         let data = FundInstruction::AddCustody {
             target_hash,
             custody_id,
+            custody_type,
         }
         .to_vec()?;
         let accounts = vec![
@@ -238,10 +245,18 @@ impl FarmClient {
             self.get_associated_token_address(wallet_address, token.name.as_str())?;
         let user_fund_token_account =
             self.get_associated_token_address(wallet_address, fund_token.name.as_str())?;
-        let custody_metadata = self.get_fund_custody_account(fund_name, token_name)?;
-        let custody_token_account = self.get_fund_custody_token_account(fund_name, token_name)?;
-        let custody_fees_token_account =
-            self.get_fund_custody_fees_token_account(fund_name, token_name)?;
+        let custody_metadata =
+            self.get_fund_custody_account(fund_name, token_name, FundCustodyType::DepositWithdraw)?;
+        let custody_token_account = self.get_fund_custody_token_account(
+            fund_name,
+            token_name,
+            FundCustodyType::DepositWithdraw,
+        )?;
+        let custody_fees_token_account = self.get_fund_custody_fees_token_account(
+            fund_name,
+            token_name,
+            FundCustodyType::DepositWithdraw,
+        )?;
         let pyth_price_info =
             self.get_oracle_price_account(&(token_name.to_string() + "/USD"), OracleType::Pyth)?;
 
@@ -262,7 +277,7 @@ impl FarmClient {
             AccountMeta::new(user_fund_token_account, false),
             AccountMeta::new(custody_token_account, false),
             AccountMeta::new(custody_fees_token_account, false),
-            AccountMeta::new(custody_metadata, false),
+            AccountMeta::new_readonly(custody_metadata, false),
             AccountMeta::new_readonly(token_ref, false),
             AccountMeta::new_readonly(pyth_price_info, false),
         ];
@@ -331,10 +346,18 @@ impl FarmClient {
             self.get_associated_token_address(user_address, token.name.as_str())?;
         let user_fund_token_account =
             self.get_associated_token_address(user_address, fund_token.name.as_str())?;
-        let custody_metadata = self.get_fund_custody_account(fund_name, token_name)?;
-        let custody_token_account = self.get_fund_custody_token_account(fund_name, token_name)?;
-        let custody_fees_token_account =
-            self.get_fund_custody_fees_token_account(fund_name, token_name)?;
+        let custody_metadata =
+            self.get_fund_custody_account(fund_name, token_name, FundCustodyType::DepositWithdraw)?;
+        let custody_token_account = self.get_fund_custody_token_account(
+            fund_name,
+            token_name,
+            FundCustodyType::DepositWithdraw,
+        )?;
+        let custody_fees_token_account = self.get_fund_custody_fees_token_account(
+            fund_name,
+            token_name,
+            FundCustodyType::DepositWithdraw,
+        )?;
         let pyth_price_info =
             self.get_oracle_price_account(&(token_name.to_string() + "/USD"), OracleType::Pyth)?;
 
@@ -356,9 +379,149 @@ impl FarmClient {
             AccountMeta::new(user_fund_token_account, false),
             AccountMeta::new(custody_token_account, false),
             AccountMeta::new(custody_fees_token_account, false),
-            AccountMeta::new(custody_metadata, false),
+            AccountMeta::new_readonly(custody_metadata, false),
             AccountMeta::new_readonly(token_ref, false),
             AccountMeta::new_readonly(pyth_price_info, false),
+        ];
+
+        Ok(Instruction {
+            program_id: fund.fund_program_id,
+            data,
+            accounts,
+        })
+    }
+
+    /// Creates a new Instruction for denying deposit to the Fund
+    pub fn new_instruction_deny_deposit_fund(
+        &self,
+        admin_address: &Pubkey,
+        user_address: &Pubkey,
+        fund_name: &str,
+        token_name: &str,
+        deny_reason: &str,
+    ) -> Result<Instruction, FarmClientError> {
+        // get fund info
+        let fund = self.get_fund(fund_name)?;
+        let fund_ref = self.get_fund_ref(fund_name)?;
+        let token = self.get_token(token_name)?;
+        let token_ref = self.get_token_ref(token_name)?;
+        let user_info_account =
+            self.get_fund_user_info_account(user_address, fund_name, token_name)?;
+        let user_deposit_token_account =
+            self.get_associated_token_address(user_address, token.name.as_str())?;
+
+        // fill in accounts and instruction data
+        let data = FundInstruction::DenyDeposit {
+            deny_reason: str_to_as64(deny_reason)?,
+        }
+        .to_vec()?;
+        let accounts = vec![
+            AccountMeta::new_readonly(*admin_address, true),
+            AccountMeta::new_readonly(fund_ref, false),
+            AccountMeta::new(fund.info_account, false),
+            AccountMeta::new_readonly(*user_address, false),
+            AccountMeta::new(user_info_account, false),
+            AccountMeta::new_readonly(token_ref, false),
+        ];
+
+        Ok(Instruction {
+            program_id: fund.fund_program_id,
+            data,
+            accounts,
+        })
+    }
+
+    /// Creates a new Instruction for moving deposited assets to the Fund
+    pub fn new_instruction_lock_assets_fund(
+        &self,
+        admin_address: &Pubkey,
+        fund_name: &str,
+        token_name: &str,
+        ui_amount: f64,
+    ) -> Result<Instruction, FarmClientError> {
+        // get fund info
+        let fund = self.get_fund(fund_name)?;
+        let fund_ref = self.get_fund_ref(fund_name)?;
+        let token = self.get_token(token_name)?;
+        let token_ref = self.get_token_ref(token_name)?;
+        let wd_custody_metadata =
+            self.get_fund_custody_account(fund_name, token_name, FundCustodyType::DepositWithdraw)?;
+        let wd_custody_token_account = self.get_fund_custody_token_account(
+            fund_name,
+            token_name,
+            FundCustodyType::DepositWithdraw,
+        )?;
+        let trading_custody_metadata =
+            self.get_fund_custody_account(fund_name, token_name, FundCustodyType::Trading)?;
+        let trading_custody_token_account =
+            self.get_fund_custody_token_account(fund_name, token_name, FundCustodyType::Trading)?;
+
+        // fill in accounts and instruction data
+        let data = FundInstruction::LockAssets {
+            amount: self.to_token_amount(ui_amount, &token),
+        }
+        .to_vec()?;
+        let accounts = vec![
+            AccountMeta::new_readonly(*admin_address, true),
+            AccountMeta::new_readonly(fund_ref, false),
+            AccountMeta::new(fund.info_account, false),
+            AccountMeta::new(fund.fund_authority, false),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new(wd_custody_token_account, false),
+            AccountMeta::new(wd_custody_metadata, false),
+            AccountMeta::new(trading_custody_token_account, false),
+            AccountMeta::new(trading_custody_metadata, false),
+            AccountMeta::new_readonly(token_ref, false),
+        ];
+
+        Ok(Instruction {
+            program_id: fund.fund_program_id,
+            data,
+            accounts,
+        })
+    }
+
+    /// Creates a new Instruction for releasing assets from the Fund to Deposit/Withdraw custody
+    pub fn new_instruction_unlock_assets_fund(
+        &self,
+        admin_address: &Pubkey,
+        fund_name: &str,
+        token_name: &str,
+        ui_amount: f64,
+    ) -> Result<Instruction, FarmClientError> {
+        // get fund info
+        let fund = self.get_fund(fund_name)?;
+        let fund_ref = self.get_fund_ref(fund_name)?;
+        let token = self.get_token(token_name)?;
+        let token_ref = self.get_token_ref(token_name)?;
+        let wd_custody_metadata =
+            self.get_fund_custody_account(fund_name, token_name, FundCustodyType::DepositWithdraw)?;
+        let wd_custody_token_account = self.get_fund_custody_token_account(
+            fund_name,
+            token_name,
+            FundCustodyType::DepositWithdraw,
+        )?;
+        let trading_custody_metadata =
+            self.get_fund_custody_account(fund_name, token_name, FundCustodyType::Trading)?;
+        let trading_custody_token_account =
+            self.get_fund_custody_token_account(fund_name, token_name, FundCustodyType::Trading)?;
+
+        // fill in accounts and instruction data
+        let data = FundInstruction::UnlockAssets {
+            amount: self.to_token_amount(ui_amount, &token),
+        }
+        .to_vec()?;
+        let accounts = vec![
+            AccountMeta::new_readonly(*admin_address, true),
+            AccountMeta::new_readonly(fund_ref, false),
+            AccountMeta::new(fund.info_account, false),
+            AccountMeta::new(fund.fund_authority, false),
+            AccountMeta::new_readonly(spl_token::id(), false),
+            AccountMeta::new(wd_custody_token_account, false),
+            AccountMeta::new(wd_custody_metadata, false),
+            AccountMeta::new(trading_custody_token_account, false),
+            AccountMeta::new(trading_custody_metadata, false),
+            AccountMeta::new_readonly(token_ref, false),
         ];
 
         Ok(Instruction {

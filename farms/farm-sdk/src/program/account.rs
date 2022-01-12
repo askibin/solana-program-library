@@ -265,8 +265,7 @@ pub fn transfer_tokens<'a, 'b>(
             destination_account.clone(),
             authority_account.clone(),
         ],
-    )?;
-    Ok(())
+    )
 }
 
 pub fn burn_tokens<'a, 'b>(
@@ -312,8 +311,7 @@ pub fn approve_delegate<'a, 'b>(
             delegate_account.clone(),
             authority_account.clone(),
         ],
-    )?;
-    Ok(())
+    )
 }
 
 pub fn revoke_delegate<'a, 'b>(
@@ -328,8 +326,7 @@ pub fn revoke_delegate<'a, 'b>(
             &[],
         )?,
         &[source_account.clone(), authority_account.clone()],
-    )?;
-    Ok(())
+    )
 }
 
 pub fn close_system_account<'a, 'b>(
@@ -377,8 +374,7 @@ pub fn close_token_account<'a, 'b>(
             receiving_account.clone(),
             authority_account.clone(),
         ],
-    )?;
-    Ok(())
+    )
 }
 
 #[cfg(test)]

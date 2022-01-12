@@ -4,9 +4,12 @@ mod utils;
 use {
     log::info,
     solana_farm_client::{client::FarmClient, error::FarmClientError},
-    solana_farm_sdk::fund::{
-        FundAssetsTrackingConfig, FundSchedule, OracleType, DISCRIMINATOR_FUND_CUSTODY,
-        DISCRIMINATOR_FUND_USER_INFO,
+    solana_farm_sdk::{
+        fund::{
+            FundAssetsTrackingConfig, FundCustodyType, FundSchedule, OracleType,
+            DISCRIMINATOR_FUND_CUSTODY, DISCRIMINATOR_FUND_USER_INFO,
+        },
+        string::str_to_as64,
     },
     solana_sdk::{
         clock::UnixTimestamp,
@@ -60,13 +63,22 @@ fn run_tests() -> Result<(), FarmClientError> {
 
     // init SOL custody
     // deposit should fail while custody is missing
-    info!("Init SOL custody");
-    assert!(client.get_fund_custody(&fund_name, token_name).is_err());
+    info!("Init Deposit/Withdraw custody for SOL");
+    assert!(client
+        .get_fund_custody(&fund_name, token_name, FundCustodyType::DepositWithdraw)
+        .is_err());
 
-    client.add_fund_custody(&admin_keypair, &fund_name, token_name)?;
-    let custody = client.get_fund_custody(&fund_name, token_name)?;
+    client.add_fund_custody(
+        &admin_keypair,
+        &fund_name,
+        token_name,
+        FundCustodyType::DepositWithdraw,
+    )?;
+    let custody =
+        client.get_fund_custody(&fund_name, token_name, FundCustodyType::DepositWithdraw)?;
     println!("{:#?}", custody);
     assert_eq!(custody.discriminator, DISCRIMINATOR_FUND_CUSTODY);
+    assert_eq!(custody.custody_type, FundCustodyType::DepositWithdraw);
 
     // set assets tracking config
     info!("Set assets tracking config");
@@ -123,6 +135,20 @@ fn run_tests() -> Result<(), FarmClientError> {
     assert_eq!(user_info.deposit_request.time, 0);
     assert!(user_info.deny_reason.is_empty());
 
+    // request and deny
+    info!("Request a new deposit and deny");
+    client.request_deposit_fund(&user_keypair, &fund_name, token_name, 1.123)?;
+    client.deny_deposit_fund(&admin_keypair, &wallet, &fund_name, token_name, "test")?;
+    let user_info = client.get_fund_user_info(&wallet, &fund_name, token_name)?;
+    assert_eq!(user_info.deposit_request.amount, 0);
+    assert_eq!(user_info.deposit_request.time, 0);
+    assert_eq!(user_info.deny_reason, str_to_as64("test")?);
+    assert_eq!(
+        user_info.last_deposit.amount,
+        client.ui_amount_to_tokens(1.123, "SOL")?
+    );
+    assert!(user_info.last_deposit.time > 0);
+
     // request and approve
     info!("Request a new deposit and approve");
     client.request_deposit_fund(&user_keypair, &fund_name, token_name, 1.123)?;
@@ -131,10 +157,40 @@ fn run_tests() -> Result<(), FarmClientError> {
     assert_eq!(user_info.deposit_request.amount, 0);
     assert_eq!(user_info.deposit_request.time, 0);
     assert!(user_info.deny_reason.is_empty());
-    assert!(user_info.last_deposit.amount > 0);
+    let deposited_amount = client.ui_amount_to_tokens(0.123 - 0.123 * 0.01, "SOL")?;
+    assert_eq!(user_info.last_deposit.amount, deposited_amount);
     assert!(user_info.last_deposit.time > 0);
     let fund_token_balance = client.get_token_account_balance(&wallet, fund_token.name.as_str())?;
     assert!(fund_token_balance > 0.0);
+    assert!(client.get_token_account_balance(&wallet, "SOL")? > 0.0);
+    let wd_custody_token_address = client.get_fund_custody_token_account(
+        &fund_name,
+        token_name,
+        FundCustodyType::DepositWithdraw,
+    )?;
+    let wd_fees_custody_token_address = client.get_fund_custody_fees_token_account(
+        &fund_name,
+        token_name,
+        FundCustodyType::DepositWithdraw,
+    )?;
+    assert_eq!(
+        deposited_amount,
+        client
+            .rpc_client
+            .get_token_account_balance(&wd_custody_token_address)?
+            .amount
+            .parse::<u64>()
+            .unwrap()
+    );
+    assert_eq!(
+        client.ui_amount_to_tokens(0.123, "SOL")? - deposited_amount,
+        client
+            .rpc_client
+            .get_token_account_balance(&wd_fees_custody_token_address)?
+            .amount
+            .parse::<u64>()
+            .unwrap()
+    );
 
     // init second user
     let user_keypair2 = Keypair::new();
@@ -170,6 +226,88 @@ fn run_tests() -> Result<(), FarmClientError> {
     assert!(fund_token_balance2 > 0.0);
     // some tolerence needed due to potential SOL/USD price change
     assert!((fund_token_balance2 - fund_token_balance).abs() / fund_token_balance < 0.01);
+    assert_eq!(
+        deposited_amount * 2,
+        client
+            .rpc_client
+            .get_token_account_balance(&wd_custody_token_address)?
+            .amount
+            .parse::<u64>()
+            .unwrap()
+    );
+    assert_eq!(
+        (client.ui_amount_to_tokens(0.123, "SOL")? - deposited_amount) * 2,
+        client
+            .rpc_client
+            .get_token_account_balance(&wd_fees_custody_token_address)?
+            .amount
+            .parse::<u64>()
+            .unwrap()
+    );
+
+    // init SOL trading custody
+    // accept should fail while custody is missing
+    info!("Init Trading custody for SOL");
+    assert!(client
+        .get_fund_custody(&fund_name, token_name, FundCustodyType::Trading)
+        .is_err());
+
+    client.add_fund_custody(
+        &admin_keypair,
+        &fund_name,
+        token_name,
+        FundCustodyType::Trading,
+    )?;
+    let custody = client.get_fund_custody(&fund_name, token_name, FundCustodyType::Trading)?;
+    println!("{:#?}", custody);
+    assert_eq!(custody.discriminator, DISCRIMINATOR_FUND_CUSTODY);
+    assert_eq!(custody.custody_type, FundCustodyType::Trading);
+
+    // accept funds into trading custody
+    info!("Accept funds into trading custody");
+    client.lock_assets_fund(&admin_keypair, &fund_name, token_name, 0.0)?;
+    assert_eq!(
+        0,
+        client
+            .rpc_client
+            .get_token_account_balance(&wd_custody_token_address)?
+            .amount
+            .parse::<u64>()
+            .unwrap()
+    );
+    let trading_custody_token_address =
+        client.get_fund_custody_token_account(&fund_name, token_name, FundCustodyType::Trading)?;
+    assert_eq!(
+        deposited_amount * 2,
+        client
+            .rpc_client
+            .get_token_account_balance(&trading_custody_token_address)?
+            .amount
+            .parse::<u64>()
+            .unwrap()
+    );
+
+    // release funds into w/d custody
+    info!("Release funds into w/d custody");
+    client.unlock_assets_fund(&admin_keypair, &fund_name, token_name, 0.0)?;
+    assert_eq!(
+        0,
+        client
+            .rpc_client
+            .get_token_account_balance(&trading_custody_token_address)?
+            .amount
+            .parse::<u64>()
+            .unwrap()
+    );
+    assert_eq!(
+        deposited_amount * 2,
+        client
+            .rpc_client
+            .get_token_account_balance(&wd_custody_token_address)?
+            .amount
+            .parse::<u64>()
+            .unwrap()
+    );
 
     Ok(())
 }

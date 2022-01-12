@@ -52,7 +52,7 @@ pub fn approve_deposit(fund: &Fund, accounts: &[AccountInfo], amount: u64) -> Pr
                 msg!("Failed to load custody token metadata");
                 return Err(ProgramError::InvalidAccountData);
             };
-        common::check_custody_accounts(
+        common::check_wd_custody_accounts(
             fund,
             &custody_token,
             user_deposit_token_account,
@@ -179,7 +179,7 @@ pub fn approve_deposit(fund: &Fund, accounts: &[AccountInfo], amount: u64) -> Pr
         // update user stats
         msg!("Update user stats");
         user_info.last_deposit.time = user_info.deposit_request.time;
-        user_info.last_deposit.amount = user_info.deposit_request.amount;
+        user_info.last_deposit.amount = deposit_amount;
         user_info.deposit_request.time = 0;
         user_info.deposit_request.amount = 0;
         user_info.deny_reason = ArrayString64::default();

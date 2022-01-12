@@ -56,7 +56,7 @@ pub fn request_deposit(fund: &Fund, accounts: &[AccountInfo], amount: u64) -> Pr
                 msg!("Failed to load custody token metadata");
                 return Err(ProgramError::InvalidAccountData);
             };
-        common::check_custody_accounts(
+        common::check_wd_custody_accounts(
             fund,
             &custody_token,
             user_deposit_token_account,
@@ -212,7 +212,7 @@ pub fn request_deposit(fund: &Fund, accounts: &[AccountInfo], amount: u64) -> Pr
 
             msg!("Update user stats");
             user_info.last_deposit.time = clock::get_time()?;
-            user_info.last_deposit.amount = amount_with_fee;
+            user_info.last_deposit.amount = deposit_amount;
         } else {
             // record the Fund as a delegate for the specified token amount to have tokens deposited later upon approval
             msg!(

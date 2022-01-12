@@ -2,8 +2,11 @@
 
 use {
     crate::{
-        fund::{FundAssetsTrackingConfig, FundSchedule},
-        pack::{check_data_len, pack_bool, unpack_bool},
+        fund::{FundAssetsTrackingConfig, FundCustodyType, FundSchedule},
+        pack::{
+            check_data_len, pack_array_string64, pack_bool, unpack_array_string64, unpack_bool,
+        },
+        string::ArrayString64,
     },
     arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs},
     num_enum::TryFromPrimitive,
@@ -40,7 +43,7 @@ pub enum FundInstruction {
     ApproveDeposit { amount: u64 },
 
     /// Deny pending deposit for the user
-    DenyDeposit,
+    DenyDeposit { deny_reason: ArrayString64 },
 
     /// Set schedule and enable withdrawals
     SetWithdrawalSchedule { schedule: FundSchedule },
@@ -52,10 +55,13 @@ pub enum FundInstruction {
     ApproveWithdrawal { amount: u64 },
 
     /// Deny pending withdrawal for the user
-    DenyWithdrawal,
+    DenyWithdrawal { deny_reason: ArrayString64 },
 
     /// Move funds from deposit/withdrawal custody to trading custody
-    AcceptFunds { amount: u64 },
+    LockAssets { amount: u64 },
+
+    /// Move funds from trading custody to deposit/withdrawal custody
+    UnlockAssets { amount: u64 },
 
     /// Set parameters for assets tracking
     SetAssetsTrackingConfig { config: FundAssetsTrackingConfig },
@@ -73,7 +79,11 @@ pub enum FundInstruction {
     RemoveVault,
 
     /// Add a Custody to the Fund
-    AddCustody { target_hash: u64, custody_id: u32 },
+    AddCustody {
+        target_hash: u64,
+        custody_id: u32,
+        custody_type: FundCustodyType,
+    },
 
     /// Remove a Custody from the Fund
     RemoveCustody,
@@ -96,7 +106,8 @@ pub enum FundInstructionType {
     DisableWithdrawals,
     ApproveWithdrawal,
     DenyWithdrawal,
-    AcceptFunds,
+    LockAssets,
+    UnlockAssets,
     SetAssetsTrackingConfig,
     UpdateAssetsWithVault,
     UpdateAssetsWithCustody,
@@ -107,7 +118,7 @@ pub enum FundInstructionType {
 }
 
 impl FundInstruction {
-    pub const MAX_LEN: usize = 34;
+    pub const MAX_LEN: usize = 65;
     pub const USER_INIT_LEN: usize = 1;
     pub const REQUEST_DEPOSIT_LEN: usize = 9;
     pub const CANCEL_DEPOSIT_LEN: usize = 1;
@@ -117,18 +128,19 @@ impl FundInstruction {
     pub const SET_DEPOSIT_SCHEDULE_LEN: usize = 34;
     pub const DISABLE_DEPOSITS_LEN: usize = 1;
     pub const APPROVE_DEPOSIT_LEN: usize = 9;
-    pub const DENY_DEPOSIT_LEN: usize = 1;
+    pub const DENY_DEPOSIT_LEN: usize = 65;
     pub const SET_WITHDRAWAL_SCHEDULE_LEN: usize = 34;
     pub const DISABLE_WITHDRAWALS_LEN: usize = 1;
     pub const APPROVE_WITHDRAWAL_LEN: usize = 9;
-    pub const DENY_WITHDRAWAL_LEN: usize = 1;
-    pub const ACCEPT_FUNDS_LEN: usize = 9;
+    pub const DENY_WITHDRAWAL_LEN: usize = 65;
+    pub const LOCK_ASSETS_LEN: usize = 9;
+    pub const UNLOCK_ASSETS_LEN: usize = 9;
     pub const SET_ASSETS_TRACKING_CONFIG_LEN: usize = 33;
     pub const UPDATE_ASSETS_WITH_VAULT_LEN: usize = 1;
     pub const UPDATE_ASSETS_WITH_CUSTODY_LEN: usize = 1;
     pub const ADD_VAULT_LEN: usize = 1;
     pub const REMOVE_VAULT_LEN: usize = 1;
-    pub const ADD_CUSTODY_LEN: usize = 13;
+    pub const ADD_CUSTODY_LEN: usize = 14;
     pub const REMOVE_CUSTODY_LEN: usize = 1;
 
     pub fn pack(&self, output: &mut [u8]) -> Result<usize, ProgramError> {
@@ -147,7 +159,8 @@ impl FundInstruction {
             Self::DisableWithdrawals { .. } => self.pack_disable_withdrawals(output),
             Self::ApproveWithdrawal { .. } => self.pack_approve_withdrawal(output),
             Self::DenyWithdrawal { .. } => self.pack_deny_withdrawal(output),
-            Self::AcceptFunds { .. } => self.pack_accept_funds(output),
+            Self::LockAssets { .. } => self.pack_accept_funds(output),
+            Self::UnlockAssets { .. } => self.pack_release_funds(output),
             Self::SetAssetsTrackingConfig { .. } => self.pack_set_assets_tracking_config(output),
             Self::UpdateAssetsWithVault { .. } => self.pack_update_assets_with_vault(output),
             Self::UpdateAssetsWithCustody { .. } => self.pack_update_assets_with_custody(output),
@@ -198,7 +211,8 @@ impl FundInstruction {
                 FundInstruction::unpack_approve_withdrawal(input)
             }
             FundInstructionType::DenyWithdrawal => FundInstruction::unpack_deny_withdrawal(input),
-            FundInstructionType::AcceptFunds => FundInstruction::unpack_accept_funds(input),
+            FundInstructionType::LockAssets => FundInstruction::unpack_accept_funds(input),
+            FundInstructionType::UnlockAssets => FundInstruction::unpack_release_funds(input),
             FundInstructionType::SetAssetsTrackingConfig => {
                 FundInstruction::unpack_set_assets_tracking_config(input)
             }
@@ -370,10 +384,13 @@ impl FundInstruction {
     fn pack_deny_deposit(&self, output: &mut [u8]) -> Result<usize, ProgramError> {
         check_data_len(output, FundInstruction::DENY_DEPOSIT_LEN)?;
 
-        if let FundInstruction::DenyDeposit = self {
-            let instruction_type_out = array_mut_ref![output, 0, 1];
+        if let FundInstruction::DenyDeposit { deny_reason } = self {
+            let output = array_mut_ref![output, 0, FundInstruction::DENY_DEPOSIT_LEN];
+            let (instruction_type_out, deny_reason_out) = mut_array_refs![output, 1, 64];
 
             instruction_type_out[0] = FundInstructionType::DenyDeposit as u8;
+
+            pack_array_string64(&deny_reason, deny_reason_out);
 
             Ok(FundInstruction::DENY_DEPOSIT_LEN)
         } else {
@@ -443,10 +460,13 @@ impl FundInstruction {
     fn pack_deny_withdrawal(&self, output: &mut [u8]) -> Result<usize, ProgramError> {
         check_data_len(output, FundInstruction::DENY_WITHDRAWAL_LEN)?;
 
-        if let FundInstruction::DenyWithdrawal = self {
-            let instruction_type_out = array_mut_ref![output, 0, 1];
+        if let FundInstruction::DenyWithdrawal { deny_reason } = self {
+            let output = array_mut_ref![output, 0, FundInstruction::DENY_WITHDRAWAL_LEN];
+            let (instruction_type_out, deny_reason_out) = mut_array_refs![output, 1, 64];
 
             instruction_type_out[0] = FundInstructionType::DenyWithdrawal as u8;
+
+            pack_array_string64(&deny_reason, deny_reason_out);
 
             Ok(FundInstruction::DENY_WITHDRAWAL_LEN)
         } else {
@@ -455,17 +475,34 @@ impl FundInstruction {
     }
 
     fn pack_accept_funds(&self, output: &mut [u8]) -> Result<usize, ProgramError> {
-        check_data_len(output, FundInstruction::ACCEPT_FUNDS_LEN)?;
+        check_data_len(output, FundInstruction::LOCK_ASSETS_LEN)?;
 
-        if let FundInstruction::AcceptFunds { amount } = self {
-            let output = array_mut_ref![output, 0, FundInstruction::ACCEPT_FUNDS_LEN];
+        if let FundInstruction::LockAssets { amount } = self {
+            let output = array_mut_ref![output, 0, FundInstruction::LOCK_ASSETS_LEN];
             let (instruction_type_out, amount_out) = mut_array_refs![output, 1, 8];
 
-            instruction_type_out[0] = FundInstructionType::AcceptFunds as u8;
+            instruction_type_out[0] = FundInstructionType::LockAssets as u8;
 
             *amount_out = amount.to_le_bytes();
 
-            Ok(FundInstruction::ACCEPT_FUNDS_LEN)
+            Ok(FundInstruction::LOCK_ASSETS_LEN)
+        } else {
+            Err(ProgramError::InvalidInstructionData)
+        }
+    }
+
+    fn pack_release_funds(&self, output: &mut [u8]) -> Result<usize, ProgramError> {
+        check_data_len(output, FundInstruction::UNLOCK_ASSETS_LEN)?;
+
+        if let FundInstruction::UnlockAssets { amount } = self {
+            let output = array_mut_ref![output, 0, FundInstruction::UNLOCK_ASSETS_LEN];
+            let (instruction_type_out, amount_out) = mut_array_refs![output, 1, 8];
+
+            instruction_type_out[0] = FundInstructionType::UnlockAssets as u8;
+
+            *amount_out = amount.to_le_bytes();
+
+            Ok(FundInstruction::UNLOCK_ASSETS_LEN)
         } else {
             Err(ProgramError::InvalidInstructionData)
         }
@@ -559,16 +596,18 @@ impl FundInstruction {
         if let FundInstruction::AddCustody {
             target_hash,
             custody_id,
+            custody_type,
         } = self
         {
             let output = array_mut_ref![output, 0, FundInstruction::ADD_CUSTODY_LEN];
-            let (instruction_type_out, target_hash_out, custody_id_out) =
-                mut_array_refs![output, 1, 8, 4];
+            let (instruction_type_out, target_hash_out, custody_id_out, custody_type_out) =
+                mut_array_refs![output, 1, 8, 4, 1];
 
             instruction_type_out[0] = FundInstructionType::AddCustody as u8;
 
             *target_hash_out = target_hash.to_le_bytes();
             *custody_id_out = custody_id.to_le_bytes();
+            custody_type_out[0] = *custody_type as u8;
 
             Ok(FundInstruction::ADD_CUSTODY_LEN)
         } else {
@@ -659,7 +698,9 @@ impl FundInstruction {
 
     fn unpack_deny_deposit(input: &[u8]) -> Result<FundInstruction, ProgramError> {
         check_data_len(input, FundInstruction::DENY_DEPOSIT_LEN)?;
-        Ok(Self::DenyDeposit)
+        Ok(Self::DenyDeposit {
+            deny_reason: unpack_array_string64(array_ref![input, 1, 64])?,
+        })
     }
 
     fn unpack_set_withdrawal_schedule(input: &[u8]) -> Result<FundInstruction, ProgramError> {
@@ -695,12 +736,21 @@ impl FundInstruction {
 
     fn unpack_deny_withdrawal(input: &[u8]) -> Result<FundInstruction, ProgramError> {
         check_data_len(input, FundInstruction::DENY_WITHDRAWAL_LEN)?;
-        Ok(Self::DenyWithdrawal)
+        Ok(Self::DenyWithdrawal {
+            deny_reason: unpack_array_string64(array_ref![input, 1, 64])?,
+        })
     }
 
     fn unpack_accept_funds(input: &[u8]) -> Result<FundInstruction, ProgramError> {
-        check_data_len(input, FundInstruction::ACCEPT_FUNDS_LEN)?;
-        Ok(Self::AcceptFunds {
+        check_data_len(input, FundInstruction::LOCK_ASSETS_LEN)?;
+        Ok(Self::LockAssets {
+            amount: u64::from_le_bytes(*array_ref![input, 1, 8]),
+        })
+    }
+
+    fn unpack_release_funds(input: &[u8]) -> Result<FundInstruction, ProgramError> {
+        check_data_len(input, FundInstruction::UNLOCK_ASSETS_LEN)?;
+        Ok(Self::UnlockAssets {
             amount: u64::from_le_bytes(*array_ref![input, 1, 8]),
         })
     }
@@ -752,11 +802,13 @@ impl FundInstruction {
 
         let input = array_ref![input, 1, FundInstruction::ADD_CUSTODY_LEN - 1];
         #[allow(clippy::ptr_offset_with_cast)]
-        let (target_hash, custody_id) = array_refs![input, 8, 4];
+        let (target_hash, custody_id, custody_type) = array_refs![input, 8, 4, 1];
 
         Ok(Self::AddCustody {
             target_hash: u64::from_le_bytes(*target_hash),
             custody_id: u32::from_le_bytes(*custody_id),
+            custody_type: FundCustodyType::try_from_primitive(custody_type[0])
+                .or(Err(ProgramError::InvalidInstructionData))?,
         })
     }
 
@@ -783,7 +835,8 @@ impl std::fmt::Display for FundInstructionType {
             FundInstructionType::DisableWithdrawals => write!(f, "DisableWithdrawals"),
             FundInstructionType::ApproveWithdrawal => write!(f, "ApproveWithdrawal"),
             FundInstructionType::DenyWithdrawal => write!(f, "DenyWithdrawal"),
-            FundInstructionType::AcceptFunds => write!(f, "AcceptFunds"),
+            FundInstructionType::LockAssets => write!(f, "LockAssets"),
+            FundInstructionType::UnlockAssets => write!(f, "UnlockAssets"),
             FundInstructionType::SetAssetsTrackingConfig => write!(f, "SetAssetsTrackingConfig"),
             FundInstructionType::UpdateAssetsWithVault => write!(f, "UpdateAssetsWithVault"),
             FundInstructionType::UpdateAssetsWithCustody => write!(f, "UpdateAssetsWithCustody"),
