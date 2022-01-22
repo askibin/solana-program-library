@@ -46,7 +46,7 @@ impl RemoveLiquidity for VaultInstruction {
         {
             // validate accounts
             if vault_authority.key != &vault.vault_authority
-                || &account::get_token_account_owner(vault_miner_account)? != vault_stake_info.key
+                || vault_miner_account.owner != spl_token_program.key || &account::get_token_account_owner(vault_miner_account)? != vault_stake_info.key
             {
                 msg!("Error: Invalid Vault accounts");
                 return Err(ProgramError::InvalidArgument);
@@ -148,7 +148,7 @@ impl RemoveLiquidity for VaultInstruction {
                 lp_remove_amount,
             )?;
 
-            // brun vault tokens
+            // burn vault tokens
             msg!(
                 "Burn Vault tokens from the user. vt_remove_amount: {}",
                 vt_remove_amount

@@ -1,4 +1,4 @@
-//! Accept and move funds inside the Fund instruction handler
+//! Move funds from deposit to trading custody instruction handler
 
 use {
     crate::{common, fund_info::FundInfo},

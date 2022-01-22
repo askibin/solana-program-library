@@ -23,10 +23,16 @@ pub fn add_custody(
 ) -> ProgramResult {
     //#[allow(clippy::deprecated_cfg_attr)]
     //#[cfg_attr(rustfmt, rustfmt_skip)]
-    if let [admin_account, fund_metadata, fund_info_account, fund_authority, _system_program, _spl_token_program, rent_program, custodies_assets_info, custody_account, custody_fees_account, custody_metadata, custody_token_metadata, custody_token_mint, pyth_price_info] =
+    if let [admin_account, fund_metadata, fund_info_account, fund_authority, _system_program, _spl_token_program, _associated_token_program, rent_program, custodies_assets_info, custody_account, custody_fees_account, custody_metadata, custody_token_metadata, custody_token_mint, pyth_price_info] =
         accounts
     {
         // validate accounts
+        msg!("Validate state and accounts");
+        let mut fund_info = FundInfo::new(fund_info_account);
+        if fund_info.get_liquidation_start_time()? > 0 {
+            msg!("Error: Fund is in liquidation state");
+            return Err(ProgramError::InvalidArgument);
+        }
         if fund_authority.key != &fund.fund_authority {
             msg!("Error: Invalid Fund authority account");
             return Err(ProgramError::InvalidArgument);
@@ -48,7 +54,7 @@ pub fn add_custody(
             };
         let custody_seed_str: &[u8] = match custody_type {
             FundCustodyType::DepositWithdraw => b"fund_wd_custody_info",
-            FundCustodyType::Trading => b"fund_trading_custody_info",
+            FundCustodyType::Trading => b"fund_td_custody_info",
             _ => unreachable!(),
         };
         let custody_seeds = &[
@@ -83,24 +89,29 @@ pub fn add_custody(
 
         // init token accounts
         msg!("Init custody token account");
-        let custody_seed_str: &[u8] = match custody_type {
-            FundCustodyType::DepositWithdraw => b"fund_wd_custody_account",
-            FundCustodyType::Trading => b"fund_trading_custody_account",
-            _ => unreachable!(),
-        };
-        pda::init_token_account(
-            admin_account,
-            custody_account,
-            custody_token_mint,
-            fund_authority,
-            rent_program,
-            &fund.fund_program_id,
-            &[
-                custody_seed_str,
-                custody_token.name.as_bytes(),
-                fund.name.as_bytes(),
-            ],
-        )?;
+        if matches!(custody_type, FundCustodyType::DepositWithdraw) {
+            pda::init_token_account(
+                admin_account,
+                custody_account,
+                custody_token_mint,
+                fund_authority,
+                rent_program,
+                &fund.fund_program_id,
+                &[
+                    b"fund_wd_custody_account",
+                    custody_token.name.as_bytes(),
+                    fund.name.as_bytes(),
+                ],
+            )?;
+        } else {
+            pda::init_associated_token_account(
+                admin_account,
+                fund_authority,
+                custody_account,
+                custody_token_mint,
+                rent_program,
+            )?;
+        }
 
         msg!("Init fee custody token account");
         let custody_seed_str: &[u8] = match custody_type {
@@ -148,7 +159,6 @@ pub fn add_custody(
 
         // update fund stats
         msg!("Update Fund stats");
-        let mut fund_info = FundInfo::new(fund_info_account);
         fund_info.update_admin_action_time()
     } else {
         Err(ProgramError::NotEnoughAccountKeys)

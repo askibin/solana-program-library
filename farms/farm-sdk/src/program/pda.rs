@@ -118,17 +118,15 @@ pub fn init_associated_token_account<'a, 'b>(
     )
 }
 
-pub fn close_token_account<'a, 'b>(
+pub fn close_token_account_with_seeds<'a, 'b>(
     receiving_account: &'a AccountInfo<'b>,
     target_account: &'a AccountInfo<'b>,
     authority_account: &'a AccountInfo<'b>,
-    base_address: &Pubkey,
-    seeds: &[&[u8]],
+    seeds: &[&[&[u8]]],
 ) -> ProgramResult {
     if target_account.data_is_empty() {
         return Ok(());
     }
-    let (_, bump) = Pubkey::find_program_address(seeds, base_address);
 
     program::invoke_signed(
         &spl_token::instruction::close_account(
@@ -143,6 +141,23 @@ pub fn close_token_account<'a, 'b>(
             receiving_account.clone(),
             authority_account.clone(),
         ],
+        seeds,
+    )
+}
+
+pub fn close_token_account<'a, 'b>(
+    receiving_account: &'a AccountInfo<'b>,
+    target_account: &'a AccountInfo<'b>,
+    authority_account: &'a AccountInfo<'b>,
+    base_address: &Pubkey,
+    seeds: &[&[u8]],
+) -> ProgramResult {
+    let (_, bump) = Pubkey::find_program_address(seeds, base_address);
+
+    close_token_account_with_seeds(
+        receiving_account,
+        target_account,
+        authority_account,
         &[&[seeds, &[&[bump]]].concat()],
     )
 }
@@ -305,6 +320,50 @@ pub fn mint_to<'a, 'b>(
         target_token_account,
         mint_account,
         mint_authority_account,
+        &[&[seeds, &[&[bump]]].concat()],
+        amount,
+    )
+}
+
+pub fn burn_tokens_with_seeds<'a, 'b>(
+    from_token_account: &'a AccountInfo<'b>,
+    mint_account: &'a AccountInfo<'b>,
+    authority_account: &'a AccountInfo<'b>,
+    seeds: &[&[&[u8]]],
+    amount: u64,
+) -> ProgramResult {
+    solana_program::program::invoke_signed(
+        &spl_token::instruction::burn(
+            &spl_token::id(),
+            from_token_account.key,
+            mint_account.key,
+            authority_account.key,
+            &[],
+            amount,
+        )?,
+        &[
+            from_token_account.clone(),
+            mint_account.clone(),
+            authority_account.clone(),
+        ],
+        seeds,
+    )
+}
+
+pub fn burn_tokens<'a, 'b>(
+    from_token_account: &'a AccountInfo<'b>,
+    mint_account: &'a AccountInfo<'b>,
+    authority_account: &'a AccountInfo<'b>,
+    base_address: &Pubkey,
+    seeds: &[&[u8]],
+    amount: u64,
+) -> ProgramResult {
+    let (_, bump) = Pubkey::find_program_address(seeds, base_address);
+
+    burn_tokens_with_seeds(
+        from_token_account,
+        mint_account,
+        authority_account,
         &[&[seeds, &[&[bump]]].concat()],
         amount,
     )

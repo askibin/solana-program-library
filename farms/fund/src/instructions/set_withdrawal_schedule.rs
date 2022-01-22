@@ -1,4 +1,4 @@
-//! Fund SetDepositSchedule instruction handler
+//! Fund SetWithdrawalSchedule instruction handler
 
 use {
     crate::fund_info::FundInfo,
@@ -14,23 +14,23 @@ use {
     },
 };
 
-pub fn set_deposit_schedule(
+pub fn set_withdrawal_schedule(
     fund: &Fund,
     fund_info: &mut FundInfo,
     accounts: &[AccountInfo],
     schedule: &FundSchedule,
 ) -> ProgramResult {
-    msg!("Update Fund deposit parameters");
+    msg!("Update Fund withdrawal parameters");
     if schedule.start_time >= schedule.end_time {
         msg!("Error: start_time must be less than end_time");
         return Err(ProgramError::InvalidArgument);
     }
 
-    fund_info.set_deposit_start_time(schedule.start_time)?;
-    fund_info.set_deposit_end_time(schedule.end_time)?;
-    fund_info.set_deposit_approval_required(schedule.approval_required)?;
-    fund_info.set_deposit_limit_usd(schedule.limit_usd)?;
-    fund_info.set_deposit_fee(schedule.fee)?;
+    fund_info.set_withdrawal_start_time(schedule.start_time)?;
+    fund_info.set_withdrawal_end_time(schedule.end_time)?;
+    fund_info.set_withdrawal_approval_required(schedule.approval_required)?;
+    fund_info.set_withdrawal_limit_usd(schedule.limit_usd)?;
+    fund_info.set_withdrawal_fee(schedule.fee)?;
 
     msg!("Update Fund stats");
     fund_info.update_admin_action_time()

@@ -120,11 +120,11 @@ pub fn init_fund(
             .0,
         };
 
-        info!("Recording fund {}", fund_name);
+        info!("Recording Fund {}", fund_name);
         client.add_fund(keypair, fund)?;
     }
 
-    info!("Initializing fund {}", fund_name);
+    info!("Initializing Fund {}", fund_name);
     client.init_fund(keypair, &fund_name, 0)?;
 
     Ok(fund_name.to_string())

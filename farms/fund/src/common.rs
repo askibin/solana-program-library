@@ -4,7 +4,7 @@ use {
     crate::fund_info::FundInfo,
     pyth_client::{CorpAction, PriceStatus, PriceType},
     solana_farm_sdk::{
-        fund::{Fund, FundCustody, FundCustodyType, FundUserInfo},
+        fund::{Fund, FundCustody, FundCustodyType, FundUserInfo, OraclePrice},
         id::zero,
         math,
         program::{account, clock},
@@ -20,7 +20,7 @@ use {
 pub fn check_wd_custody_accounts<'a, 'b>(
     fund: &Fund,
     custody_token: &Token,
-    user_deposit_token_account: &'a AccountInfo<'b>,
+    user_wd_token_account: &'a AccountInfo<'b>,
     custody_account: &'a AccountInfo<'b>,
     custody_fees_account: &'a AccountInfo<'b>,
     custody_metadata: &'a AccountInfo<'b>,
@@ -33,7 +33,7 @@ pub fn check_wd_custody_accounts<'a, 'b>(
     //    return Err(ProgramError::IllegalOwner);
     //}
     let deposit_token_mint =
-        if let Ok(mint) = account::get_token_account_mint(user_deposit_token_account) {
+        if let Ok(mint) = account::get_token_account_mint(user_wd_token_account) {
             mint
         } else {
             msg!("Error: Invalid user's deposit token account");
@@ -117,7 +117,7 @@ pub fn check_custody_account<'a, 'b>(
     };
     let custody_seed_str: &[u8] = match custody_type {
         FundCustodyType::DepositWithdraw => b"fund_wd_custody_info",
-        FundCustodyType::Trading => b"fund_trading_custody_info",
+        FundCustodyType::Trading => b"fund_td_custody_info",
         _ => unreachable!(),
     };
     let custody_metadata_derived = Pubkey::create_program_address(
@@ -137,6 +137,56 @@ pub fn check_custody_account<'a, 'b>(
 
     Ok(())
 }
+/*
+pub fn check_trading_custody<'a, 'b>(
+    fund: &Fund,
+    custody_account: &'a AccountInfo<'b>,
+) -> ProgramResult {
+    if account::get_token_account_owner(custody_account)? != fund.fund_program_id
+    {
+        msg!("Error: Invalid custody owner");
+        return Err(ProgramError::IllegalOwner);
+    }
+    get_associated_token_address(wallet_address, &token.mint)
+
+    let custody_account_mint = if let Ok(mint) = account::get_token_account_mint(custody_account) {
+        mint
+    } else {
+        msg!("Error: Invalid custody token account");
+        return Err(ProgramError::InvalidAccountData);
+    };
+    if custody_token.mint != custody_account_mint {
+        msg!("Error: Custody mint mismatch");
+        return Err(ProgramError::InvalidArgument);
+    }
+    let custody = if let Ok(custody) = FundCustody::unpack(custody_metadata.try_borrow_data()?) {
+        custody
+    } else {
+        msg!("Failed to load custody metadata");
+        return Err(ProgramError::InvalidAccountData);
+    };
+    let custody_seed_str: &[u8] = match custody_type {
+        FundCustodyType::DepositWithdraw => b"fund_wd_custody_info",
+        FundCustodyType::Trading => b"fund_td_custody_info",
+        _ => unreachable!(),
+    };
+    let custody_metadata_derived = Pubkey::create_program_address(
+        &[
+            custody_seed_str,
+            custody_token.name.as_bytes(),
+            fund.name.as_bytes(),
+            &[custody.bump],
+        ],
+        &fund.fund_program_id,
+    )?;
+    if &custody_metadata_derived != custody_metadata.key || &custody.address != custody_account.key
+    {
+        msg!("Error: Invalid custody accounts");
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    Ok(())
+}*/
 
 pub fn check_user_info_account<'a, 'b>(
     fund: &Fund,
@@ -172,7 +222,7 @@ pub fn check_fund_token_mint<'a, 'b>(
     fund_token_mint: &'a AccountInfo<'b>,
 ) -> ProgramResult {
     //if account::get_mint_authority(fund_token_mint)? != &fund.fund_program_id {
-    //    msg!("Error: Invalid fund token mint authority");
+    //    msg!("Error: Invalid Fund token mint authority");
     //    return Err(ProgramError::IllegalOwner);
     //}
     let fund_token_mint_derived = Pubkey::create_program_address(
@@ -184,7 +234,7 @@ pub fn check_fund_token_mint<'a, 'b>(
         &fund.fund_program_id,
     )?;
     if fund_token_mint.key != &fund_token_mint_derived {
-        msg!("Error: Invalid fund token mint");
+        msg!("Error: Invalid Fund token mint");
         Err(ProgramError::InvalidArgument)
     } else {
         Ok(())
@@ -228,16 +278,11 @@ pub fn check_assets_limit_usd(
     Ok(())
 }
 
-pub fn get_asset_value_usd<'a, 'b>(
-    amount: u64,
-    decimals: u8,
+pub fn get_pyth_price<'a, 'b>(
+    pyth_price_info: &'a AccountInfo<'b>,
     max_price_error: f64,
     max_price_age_sec: u64,
-    pyth_price_info: &'a AccountInfo<'b>,
-) -> Result<f64, ProgramError> {
-    if amount == 0 {
-        return Ok(0.0);
-    }
+) -> Result<OraclePrice, ProgramError> {
     if pyth_price_info.data_is_empty() {
         msg!("Error: Invalid Pyth oracle account");
         return Err(ProgramError::Custom(300));
@@ -269,8 +314,46 @@ pub fn get_asset_value_usd<'a, 'b>(
         return Err(ProgramError::Custom(303));
     }
 
-    Ok(amount as f64 * pyth_price.agg.price as f64
-        / f64::powi(10.0, decimals as i32 - pyth_price.expo))
+    Ok(OraclePrice {
+        price: pyth_price.agg.price as u64,
+        exponent: pyth_price.expo,
+    })
+}
+
+// Converts token amount to USD using price oracle
+pub fn get_asset_value_usd<'a, 'b>(
+    amount: u64,
+    decimals: u8,
+    max_price_error: f64,
+    max_price_age_sec: u64,
+    pyth_price_info: &'a AccountInfo<'b>,
+) -> Result<f64, ProgramError> {
+    if amount == 0 {
+        return Ok(0.0);
+    }
+    let pyth_price = get_pyth_price(pyth_price_info, max_price_error, max_price_age_sec)?;
+
+    Ok(amount as f64 * pyth_price.price as f64
+        / f64::powi(10.0, decimals as i32 - pyth_price.exponent))
+}
+
+// Converts USD amount to tokens using price oracle
+pub fn get_asset_value_tokens<'a, 'b>(
+    usd_amount: f64,
+    token_decimals: u8,
+    max_price_error: f64,
+    max_price_age_sec: u64,
+    pyth_price_info: &'a AccountInfo<'b>,
+) -> Result<u64, ProgramError> {
+    if usd_amount == 0.0 {
+        return Ok(0);
+    }
+    let pyth_price = get_pyth_price(pyth_price_info, max_price_error, max_price_age_sec)?;
+
+    Ok(math::checked_as_u64(
+        usd_amount as f64 / pyth_price.price as f64
+            * f64::powi(10.0, token_decimals as i32 - pyth_price.exponent),
+    )?)
 }
 
 pub fn get_fund_token_to_mint_amount(

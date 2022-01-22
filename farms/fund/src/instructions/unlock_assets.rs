@@ -1,4 +1,4 @@
-//! Release and move funds out of the Fund instruction handler
+//! Move funds from trading to withdrawal custody instruction handler
 
 use {
     crate::{common, fund_info::FundInfo},

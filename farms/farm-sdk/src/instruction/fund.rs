@@ -3,6 +3,7 @@
 use {
     crate::{
         fund::{FundAssetsTrackingConfig, FundCustodyType, FundSchedule},
+        instruction::amm::AmmInstruction,
         pack::{
             check_data_len, pack_array_string64, pack_bool, unpack_array_string64, unpack_bool,
         },
@@ -86,7 +87,13 @@ pub enum FundInstruction {
     },
 
     /// Remove a Custody from the Fund
-    RemoveCustody,
+    RemoveCustody {
+        target_hash: u64,
+        custody_type: FundCustodyType,
+    },
+
+    /// Raydium pool instructions
+    AmmInstructionRaydium { instruction: AmmInstruction },
 }
 
 #[repr(u8)]
@@ -115,6 +122,7 @@ pub enum FundInstructionType {
     RemoveVault,
     AddCustody,
     RemoveCustody,
+    AmmInstructionRaydium,
 }
 
 impl FundInstruction {
@@ -141,7 +149,7 @@ impl FundInstruction {
     pub const ADD_VAULT_LEN: usize = 1;
     pub const REMOVE_VAULT_LEN: usize = 1;
     pub const ADD_CUSTODY_LEN: usize = 14;
-    pub const REMOVE_CUSTODY_LEN: usize = 1;
+    pub const REMOVE_CUSTODY_LEN: usize = 10;
 
     pub fn pack(&self, output: &mut [u8]) -> Result<usize, ProgramError> {
         match self {
@@ -168,6 +176,7 @@ impl FundInstruction {
             Self::RemoveVault { .. } => self.pack_remove_vault(output),
             Self::AddCustody { .. } => self.pack_add_custody(output),
             Self::RemoveCustody { .. } => self.pack_remove_custody(output),
+            Self::AmmInstructionRaydium { .. } => self.pack_amm_instruction_raydium(output),
         }
     }
 
@@ -226,6 +235,9 @@ impl FundInstruction {
             FundInstructionType::RemoveVault => FundInstruction::unpack_remove_vault(input),
             FundInstructionType::AddCustody => FundInstruction::unpack_add_custody(input),
             FundInstructionType::RemoveCustody => FundInstruction::unpack_remove_custody(input),
+            FundInstructionType::AmmInstructionRaydium => {
+                FundInstruction::unpack_amm_instruction_raydium(input)
+            }
         }
     }
 
@@ -618,12 +630,34 @@ impl FundInstruction {
     fn pack_remove_custody(&self, output: &mut [u8]) -> Result<usize, ProgramError> {
         check_data_len(output, FundInstruction::REMOVE_CUSTODY_LEN)?;
 
-        if let FundInstruction::RemoveCustody = self {
-            let instruction_type_out = array_mut_ref![output, 0, 1];
+        if let FundInstruction::RemoveCustody {
+            target_hash,
+            custody_type,
+        } = self
+        {
+            let output = array_mut_ref![output, 0, FundInstruction::REMOVE_CUSTODY_LEN];
+            let (instruction_type_out, target_hash_out, custody_type_out) =
+                mut_array_refs![output, 1, 8, 1];
 
             instruction_type_out[0] = FundInstructionType::RemoveCustody as u8;
 
+            *target_hash_out = target_hash.to_le_bytes();
+            custody_type_out[0] = *custody_type as u8;
+
             Ok(FundInstruction::REMOVE_CUSTODY_LEN)
+        } else {
+            Err(ProgramError::InvalidInstructionData)
+        }
+    }
+
+    fn pack_amm_instruction_raydium(&self, output: &mut [u8]) -> Result<usize, ProgramError> {
+        if let FundInstruction::AmmInstructionRaydium { instruction } = self {
+            check_data_len(output, 1)?;
+
+            let instruction_type_out = array_mut_ref![output, 0, 1];
+            instruction_type_out[0] = FundInstructionType::AmmInstructionRaydium as u8;
+
+            instruction.pack(&mut output[1..])
         } else {
             Err(ProgramError::InvalidInstructionData)
         }
@@ -814,7 +848,22 @@ impl FundInstruction {
 
     fn unpack_remove_custody(input: &[u8]) -> Result<FundInstruction, ProgramError> {
         check_data_len(input, FundInstruction::REMOVE_CUSTODY_LEN)?;
-        Ok(Self::RemoveCustody)
+
+        let input = array_ref![input, 1, FundInstruction::REMOVE_CUSTODY_LEN - 1];
+        #[allow(clippy::ptr_offset_with_cast)]
+        let (target_hash, custody_type) = array_refs![input, 8, 1];
+
+        Ok(Self::RemoveCustody {
+            target_hash: u64::from_le_bytes(*target_hash),
+            custody_type: FundCustodyType::try_from_primitive(custody_type[0])
+                .or(Err(ProgramError::InvalidInstructionData))?,
+        })
+    }
+
+    fn unpack_amm_instruction_raydium(input: &[u8]) -> Result<FundInstruction, ProgramError> {
+        Ok(Self::AmmInstructionRaydium {
+            instruction: AmmInstruction::unpack(&input[1..])?,
+        })
     }
 }
 
@@ -844,6 +893,7 @@ impl std::fmt::Display for FundInstructionType {
             FundInstructionType::RemoveVault => write!(f, "RemoveVault"),
             FundInstructionType::AddCustody => write!(f, "AddCustody"),
             FundInstructionType::RemoveCustody => write!(f, "RemoveCustody"),
+            FundInstructionType::AmmInstructionRaydium => write!(f, "AmmInstructionRaydium"),
         }
     }
 }

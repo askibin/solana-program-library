@@ -46,7 +46,7 @@ pub fn request_deposit(fund: &Fund, accounts: &[AccountInfo], amount: u64) -> Pr
         if user_fund_token_account.data_is_empty()
             || &account::get_token_account_owner(user_fund_token_account)? != user_account.key
         {
-            msg!("Error: Invalid fund token account owner");
+            msg!("Error: Invalid Fund token account owner");
             return Err(ProgramError::IllegalOwner);
         }
         let custody_token =
@@ -112,7 +112,7 @@ pub fn request_deposit(fund: &Fund, accounts: &[AccountInfo], amount: u64) -> Pr
             deposit_amount = amount - deposit_fee;
         }
         if deposit_amount == 0 || deposit_amount + deposit_fee > user_token_balance {
-            msg!("Error: Insufficient funds");
+            msg!("Error: Insufficient user funds");
             return Err(ProgramError::InsufficientFunds);
         }
         let amount_with_fee = deposit_amount + deposit_fee;
@@ -213,6 +213,8 @@ pub fn request_deposit(fund: &Fund, accounts: &[AccountInfo], amount: u64) -> Pr
             msg!("Update user stats");
             user_info.last_deposit.time = clock::get_time()?;
             user_info.last_deposit.amount = deposit_amount;
+            user_info.deposit_request.time = 0;
+            user_info.deposit_request.amount = 0;
         } else {
             // record the Fund as a delegate for the specified token amount to have tokens deposited later upon approval
             msg!(

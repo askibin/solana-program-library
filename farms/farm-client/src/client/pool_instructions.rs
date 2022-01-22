@@ -129,14 +129,14 @@ impl FarmClient {
     pub fn new_instruction_swap(
         &self,
         wallet_address: &Pubkey,
-        pool_code: &str,
+        protocol: &str,
         from_token: &str,
         to_token: &str,
         ui_amount_in: f64,
         min_ui_amount_out: f64,
     ) -> Result<Instruction, FarmClientError> {
         // get pool to swap in
-        let pool = self.find_pools(pool_code, from_token, to_token)?[0];
+        let pool = self.find_pools(protocol, from_token, to_token)?[0];
         let reverse = FarmClient::pool_has_reverse_tokens(&pool.name, from_token)?;
 
         // get tokens info

@@ -6,18 +6,27 @@ use {
     crate::{
         fund_info::FundInfo,
         instructions::{
-            /*lock_assets::lock_assets, */ add_custody::add_custody,
-            approve_deposit::approve_deposit, cancel_deposit::cancel_deposit,
-            deny_deposit::deny_deposit, init::init, lock_assets::lock_assets,
-            request_deposit::request_deposit,
+            add_custody::add_custody, approve_deposit::approve_deposit,
+            approve_withdrawal::approve_withdrawal, cancel_deposit::cancel_deposit,
+            cancel_withdrawal::cancel_withdrawal, deny_deposit::deny_deposit,
+            deny_withdrawal::deny_withdrawal, disable_deposits::disable_deposits,
+            disable_withdrawals::disable_withdrawals, init::init, lock_assets::lock_assets,
+            raydium_swap::raydium_swap, remove_custody::remove_custody,
+            request_deposit::request_deposit, request_withdrawal::request_withdrawal,
             set_assets_tracking_config::set_assets_tracking_config,
-            set_deposit_schedule::set_deposit_schedule, unlock_assets::unlock_assets,
-            user_init::user_init,
+            set_deposit_schedule::set_deposit_schedule,
+            set_withdrawal_schedule::set_withdrawal_schedule, unlock_assets::unlock_assets,
+            update_assets_with_custody::update_assets_with_custody, user_init::user_init,
         },
     },
     solana_farm_sdk::{
-        fund::Fund, id::main_router, instruction::fund::FundInstruction, log::sol_log_params_short,
-        program::pda, refdb, string::ArrayString64,
+        fund::Fund,
+        id::main_router,
+        instruction::{amm::AmmInstruction, fund::FundInstruction},
+        log::sol_log_params_short,
+        program::pda,
+        refdb,
+        string::ArrayString64,
     },
     solana_program::{
         account_info::{next_account_info, AccountInfo},
@@ -114,9 +123,11 @@ pub fn process_instruction(
         }
         FundInstruction::RequestWithdrawal { amount } => {
             log_start("RequestWithdrawal", &fund.name);
+            request_withdrawal(&fund, accounts, amount)?
         }
         FundInstruction::CancelWithdrawal => {
             log_start("CancelWithdrawal", &fund.name);
+            cancel_withdrawal(&fund, accounts)?
         }
         FundInstruction::Init { step } => {
             log_start("Init", &fund.name);
@@ -136,6 +147,7 @@ pub fn process_instruction(
         FundInstruction::DisableDeposits => {
             log_start("DisableDeposits", &fund.name);
             check_authority(user_account, &fund)?;
+            disable_deposits(&fund, &mut FundInfo::new(fund_info_account), accounts)?
         }
         FundInstruction::ApproveDeposit { amount } => {
             log_start("ApproveDeposit", &fund.name);
@@ -150,18 +162,27 @@ pub fn process_instruction(
         FundInstruction::SetWithdrawalSchedule { schedule } => {
             log_start("SetWithdrawalSchedule", &fund.name);
             check_authority(user_account, &fund)?;
+            set_withdrawal_schedule(
+                &fund,
+                &mut FundInfo::new(fund_info_account),
+                accounts,
+                &schedule,
+            )?
         }
         FundInstruction::DisableWithdrawals => {
             log_start("DisableWithdrawals", &fund.name);
             check_authority(user_account, &fund)?;
+            disable_withdrawals(&fund, &mut FundInfo::new(fund_info_account), accounts)?
         }
         FundInstruction::ApproveWithdrawal { amount } => {
             log_start("ApproveWithdrawal", &fund.name);
             check_authority(user_account, &fund)?;
+            approve_withdrawal(&fund, accounts, amount)?
         }
         FundInstruction::DenyWithdrawal { deny_reason } => {
             log_start("DenyWithdrawal", &fund.name);
             check_authority(user_account, &fund)?;
+            deny_withdrawal(&fund, accounts, &deny_reason)?
         }
         FundInstruction::LockAssets { amount } => {
             log_start("LockAssets", &fund.name);
@@ -188,6 +209,7 @@ pub fn process_instruction(
         }
         FundInstruction::UpdateAssetsWithCustody => {
             log_start("UpdateAssetsWithCustody", &fund.name);
+            update_assets_with_custody(&fund, accounts)?
         }
         FundInstruction::AddVault => {
             log_start("AddVault", &fund.name);
@@ -206,10 +228,35 @@ pub fn process_instruction(
             check_authority(user_account, &fund)?;
             add_custody(&fund, accounts, target_hash, custody_id, custody_type)?
         }
-        FundInstruction::RemoveCustody => {
+        FundInstruction::RemoveCustody {
+            target_hash,
+            custody_type,
+        } => {
             log_start("RemoveCustody", &fund.name);
             check_authority(user_account, &fund)?;
+            remove_custody(&fund, accounts, target_hash, custody_type)?
         }
+        FundInstruction::AmmInstructionRaydium { instruction } => match instruction {
+            AmmInstruction::Swap {
+                token_a_amount_in,
+                token_b_amount_in,
+                min_token_amount_out,
+            } => {
+                log_start("SwapRaydium", &fund.name);
+                check_authority(user_account, &fund)?;
+                raydium_swap(
+                    &fund,
+                    accounts,
+                    token_a_amount_in,
+                    token_b_amount_in,
+                    min_token_amount_out,
+                )?
+            }
+            _ => {
+                msg!("Error: Unimplemented");
+                return Err(ProgramError::InvalidArgument);
+            }
+        },
     }
 
     log_end(&fund.name);

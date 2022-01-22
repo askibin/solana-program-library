@@ -26,6 +26,12 @@ pub enum OracleType {
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OraclePrice {
+    pub price: u64,
+    pub exponent: i32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Fund {
     #[serde(
         serialize_with = "as64_serialize",

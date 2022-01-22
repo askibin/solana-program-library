@@ -3074,20 +3074,20 @@ impl FarmClient {
     ) -> Result<Pubkey, FarmClientError> {
         let fund = self.get_fund(fund_name)?;
         let token = self.get_token(token_name)?;
-        let custody_seed_str: &[u8] = match custody_type {
-            FundCustodyType::DepositWithdraw => b"fund_wd_custody_account",
-            FundCustodyType::Trading => b"fund_trading_custody_account",
-            _ => unreachable!(),
-        };
-        Ok(Pubkey::find_program_address(
-            &[
-                custody_seed_str,
-                token.name.as_bytes(),
-                fund.name.as_bytes(),
-            ],
-            &fund.fund_program_id,
-        )
-        .0)
+
+        if matches!(custody_type, FundCustodyType::DepositWithdraw) {
+            Ok(Pubkey::find_program_address(
+                &[
+                    b"fund_wd_custody_account",
+                    token.name.as_bytes(),
+                    fund.name.as_bytes(),
+                ],
+                &fund.fund_program_id,
+            )
+            .0)
+        } else {
+            self.get_associated_token_address(&fund.fund_authority, token_name)
+        }
     }
 
     /// Returns the token account address for the fees custody
@@ -3126,7 +3126,7 @@ impl FarmClient {
         let token = self.get_token(token_name)?;
         let custody_seed_str: &[u8] = match custody_type {
             FundCustodyType::DepositWithdraw => b"fund_wd_custody_info",
-            FundCustodyType::Trading => b"fund_trading_custody_info",
+            FundCustodyType::Trading => b"fund_td_custody_info",
             _ => unreachable!(),
         };
         Ok(Pubkey::find_program_address(
@@ -3190,6 +3190,24 @@ impl FarmClient {
         self.sign_and_send_instructions(&[admin_signer], &[inst])
     }
 
+    /// Removes the custody from the Fund
+    pub fn remove_fund_custody(
+        &self,
+        admin_signer: &dyn Signer,
+        fund_name: &str,
+        token_name: &str,
+        custody_type: FundCustodyType,
+    ) -> Result<Signature, FarmClientError> {
+        // create and send the instruction
+        let inst = self.new_instruction_remove_fund_custody(
+            &admin_signer.pubkey(),
+            fund_name,
+            token_name,
+            custody_type,
+        )?;
+        self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
     /// Initializes a Fund
     pub fn init_fund(
         &self,
@@ -3243,6 +3261,19 @@ impl FarmClient {
             schedule,
         )?;
         self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
+    /// Disables deposits to the Fund.
+    /// Same outcome can be achieved with set_fund_deposit_schedule(),
+    /// disable_deposits_fund() function is just more explicit.
+    pub fn disable_deposits_fund(
+        &self,
+        signer: &dyn Signer,
+        fund_name: &str,
+    ) -> Result<Signature, FarmClientError> {
+        // create and send the instruction
+        let inst = self.new_instruction_disable_deposits_fund(&signer.pubkey(), fund_name)?;
+        self.sign_and_send_instructions(&[signer], &[inst])
     }
 
     /// Requests a new deposit to the Fund
@@ -3333,6 +3364,125 @@ impl FarmClient {
         self.sign_and_send_instructions(&[admin_signer], &[inst])
     }
 
+    /// Sets a new withdrawal schedule for the Fund
+    pub fn set_fund_withdrawal_schedule(
+        &self,
+        admin_signer: &dyn Signer,
+        fund_name: &str,
+        schedule: &FundSchedule,
+    ) -> Result<Signature, FarmClientError> {
+        // create and send the instruction
+        let inst = self.new_instruction_set_fund_withdrawal_schedule(
+            &admin_signer.pubkey(),
+            fund_name,
+            schedule,
+        )?;
+        self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
+    /// Disables withdrawals from the Fund.
+    /// Same outcome can be achieved with set_fund_withdrawal_schedule(),
+    /// disable_withdrawals_fund() function is just more explicit.
+    pub fn disable_withdrawals_fund(
+        &self,
+        signer: &dyn Signer,
+        fund_name: &str,
+    ) -> Result<Signature, FarmClientError> {
+        // create and send the instruction
+        let inst = self.new_instruction_disable_withdrawals_fund(&signer.pubkey(), fund_name)?;
+        self.sign_and_send_instructions(&[signer], &[inst])
+    }
+
+    /// Requests a new withdrawal from the Fund
+    pub fn request_withdrawal_fund(
+        &self,
+        signer: &dyn Signer,
+        fund_name: &str,
+        token_name: &str,
+        ui_amount: f64,
+    ) -> Result<Signature, FarmClientError> {
+        if ui_amount < 0.0 {
+            return Err(FarmClientError::ValueError(format!(
+                "Invalid withdrawal amount {} specified for Fund {}: Must be greater or equal to zero.",
+                ui_amount, fund_name
+            )));
+        }
+
+        let mut inst = Vec::<Instruction>::new();
+        let fund = self.get_fund(fund_name)?;
+        let fund_token = Some(self.get_token_by_ref(&fund.fund_token_ref)?);
+        let _ = self.check_token_account(&signer.pubkey(), &fund_token, ui_amount, &mut inst)?;
+
+        // create and send the instruction
+        inst.push(self.new_instruction_request_withdrawal_fund(
+            &signer.pubkey(),
+            fund_name,
+            token_name,
+            ui_amount,
+        )?);
+        self.sign_and_send_instructions(&[signer], inst.as_slice())
+    }
+
+    /// Cancels pending withdrawal from the Fund
+    pub fn cancel_withdrawal_fund(
+        &self,
+        signer: &dyn Signer,
+        fund_name: &str,
+        token_name: &str,
+    ) -> Result<Signature, FarmClientError> {
+        // create and send the instruction
+        let inst =
+            self.new_instruction_cancel_withdrawal_fund(&signer.pubkey(), fund_name, token_name)?;
+        self.sign_and_send_instructions(&[signer], &[inst])
+    }
+
+    /// Approves pending withdrawal from the Fund
+    pub fn approve_withdrawal_fund(
+        &self,
+        admin_signer: &dyn Signer,
+        user_address: &Pubkey,
+        fund_name: &str,
+        token_name: &str,
+        ui_amount: f64,
+    ) -> Result<Signature, FarmClientError> {
+        if ui_amount < 0.0 {
+            return Err(FarmClientError::ValueError(format!(
+                "Invalid approve amount {} specified for Fund {}: Must be greater or equal to zero.",
+                ui_amount, fund_name
+            )));
+        }
+
+        // create and send the instruction
+        let inst = self.new_instruction_approve_withdrawal_fund(
+            &admin_signer.pubkey(),
+            &user_address,
+            fund_name,
+            token_name,
+            ui_amount,
+        )?;
+        self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
+    /// Denies pending withdrawal from the Fund
+    pub fn deny_withdrawal_fund(
+        &self,
+        admin_signer: &dyn Signer,
+        user_address: &Pubkey,
+        fund_name: &str,
+        token_name: &str,
+        deny_reason: &str,
+    ) -> Result<Signature, FarmClientError> {
+        // create and send the instruction
+        let inst = self.new_instruction_deny_withdrawal_fund(
+            &admin_signer.pubkey(),
+            &user_address,
+            fund_name,
+            token_name,
+            deny_reason,
+        )?;
+        self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
     /// Moves deposited assets from Deposit/Withdraw custody to the Fund
     pub fn lock_assets_fund(
         &self,
@@ -3381,6 +3531,85 @@ impl FarmClient {
             ui_amount,
         )?;
         self.sign_and_send_instructions(&[admin_signer], &[inst])
+    }
+
+    /// Swap tokens in the Fund
+    pub fn fund_swap(
+        &self,
+        admin_signer: &dyn Signer,
+        fund_name: &str,
+        protocol: &str,
+        from_token: &str,
+        to_token: &str,
+        ui_amount_in: f64,
+        min_ui_amount_out: f64,
+    ) -> Result<Signature, FarmClientError> {
+        // check amount
+        if ui_amount_in < 0.0 {
+            return Err(FarmClientError::ValueError(format!(
+                "Invalid ui_amount_in {} specified for swap: Must be zero or greater.",
+                ui_amount_in
+            )));
+        }
+        let fund = self.get_fund(fund_name)?;
+        let balance = self.get_token_account_balance(&fund.fund_authority, from_token)?;
+        if balance < ui_amount_in {
+            return Err(FarmClientError::InsufficientBalance(from_token.to_string()));
+        }
+
+        // check source custody
+        if self
+            .get_fund_custody(&fund_name, from_token, FundCustodyType::Trading)
+            .is_err()
+        {
+            return Err(FarmClientError::RecordNotFound(format!(
+                "Can't perfrom the swap: Source custody for token {} in Fund {} not found.",
+                from_token, fund_name
+            )));
+        }
+
+        // check target custody
+        let mut inst = Vec::<Instruction>::new();
+        if self
+            .get_fund_custody(&fund_name, to_token, FundCustodyType::Trading)
+            .is_err()
+        {
+            inst.push(self.new_instruction_add_fund_custody(
+                &admin_signer.pubkey(),
+                fund_name,
+                to_token,
+                FundCustodyType::Trading,
+            )?)
+        }
+
+        // create and send the instruction
+        inst.push(self.new_instruction_fund_swap(
+            &admin_signer.pubkey(),
+            fund_name,
+            protocol,
+            from_token,
+            to_token,
+            ui_amount_in,
+            min_ui_amount_out,
+        )?);
+        self.sign_and_send_instructions(&[admin_signer], &inst)
+    }
+
+    pub fn update_fund_assets_with_custody(
+        &self,
+        signer: &dyn Signer,
+        fund_name: &str,
+        token_name: &str,
+        custody_type: FundCustodyType,
+    ) -> Result<Signature, FarmClientError> {
+        // create and send the instruction
+        let inst = self.new_instruction_update_fund_assets_with_custody(
+            &signer.pubkey(),
+            fund_name,
+            token_name,
+            custody_type,
+        )?;
+        self.sign_and_send_instructions(&[signer], &[inst])
     }
 
     /// Returns oracle price account for the given symbol.
@@ -3445,6 +3674,9 @@ impl FarmClient {
         }
         let acc = match symbol {
             "SOL/USD" => "J83w4HKfqxwcq3BEMMkPFSppX3gqekLyLJBexebFVkix",
+            "USDC/USD" => "5SSkXsEKQepHHAewytPVwdej4epN1nxgLVM84L4KXgy7",
+            "COIN/USD" => "5SSkXsEKQepHHAewytPVwdej4epN1nxgLVM84L4KXgy7",
+            "PC/USD" => "5SSkXsEKQepHHAewytPVwdej4epN1nxgLVM84L4KXgy7",
             _ => {
                 return Err(FarmClientError::RecordNotFound(format!(
                     "Pyth account for {}",

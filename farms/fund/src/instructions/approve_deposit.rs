@@ -42,7 +42,7 @@ pub fn approve_deposit(fund: &Fund, accounts: &[AccountInfo], amount: u64) -> Pr
         if user_fund_token_account.data_is_empty()
             || &account::get_token_account_owner(user_fund_token_account)? != user_account.key
         {
-            msg!("Error: Invalid fund token account owner");
+            msg!("Error: Invalid Fund token account owner");
             return Err(ProgramError::IllegalOwner);
         }
         let custody_token =
@@ -94,7 +94,7 @@ pub fn approve_deposit(fund: &Fund, accounts: &[AccountInfo], amount: u64) -> Pr
         let deposit_fee = math::checked_as_u64(fund_fee * (amount as f64))?;
         let deposit_amount = amount - deposit_fee;
         if deposit_amount == 0 {
-            msg!("Error: Insufficient funds");
+            msg!("Error: Insufficient user funds");
             return Err(ProgramError::InsufficientFunds);
         }
 

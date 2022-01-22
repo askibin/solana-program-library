@@ -20,12 +20,12 @@ pub fn set_assets_tracking_config(
     accounts: &[AccountInfo],
     config: &FundAssetsTrackingConfig,
 ) -> ProgramResult {
-    msg!("Update fund assets tracking parameters");
+    msg!("Update Fund assets tracking parameters");
     fund_info.set_assets_limit_usd(config.assets_limit_usd)?;
     fund_info.set_assets_max_update_age_sec(config.max_update_age_sec)?;
     fund_info.set_assets_max_price_error(config.max_price_error)?;
     fund_info.set_assets_max_price_age_sec(config.max_price_age_sec)?;
 
-    msg!("Update fund stats");
+    msg!("Update Fund stats");
     fund_info.update_admin_action_time()
 }

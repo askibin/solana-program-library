@@ -35,7 +35,7 @@ impl LockLiquidity for VaultInstruction {
         {
             // validate accounts
             if vault_authority.key != &vault.vault_authority
-                || &account::get_token_account_owner(vault_miner_account)? != vault_stake_info.key
+                || vault_miner_account.owner != spl_token_program.key || &account::get_token_account_owner(vault_miner_account)? != vault_stake_info.key
             {
                 msg!("Error: Invalid Vault accounts");
                 return Err(ProgramError::InvalidArgument);

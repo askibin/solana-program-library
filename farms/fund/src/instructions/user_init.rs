@@ -1,4 +1,4 @@
-//! Initialize a new user for the Fund instruction
+//! Initialize a new user for the Fund instruction handler
 use {
     solana_farm_sdk::{
         fund::{Fund, FundUserAction, FundUserInfo, DISCRIMINATOR_FUND_USER_INFO},

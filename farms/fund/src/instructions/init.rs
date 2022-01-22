@@ -29,7 +29,7 @@ pub fn init(fund: &Fund, accounts: &[AccountInfo], step: u64) -> ProgramResult {
         }
 
         // init fund authority account
-        msg!("Init fund authority");
+        msg!("Init Fund authority");
         pda::init_system_account(
             admin_account,
             fund_authority,
@@ -40,7 +40,7 @@ pub fn init(fund: &Fund, accounts: &[AccountInfo], step: u64) -> ProgramResult {
         )?;
 
         // init fund info account
-        msg!("Init fund info");
+        msg!("Init Fund info");
         pda::init_system_account(
             admin_account,
             fund_info_account,
@@ -53,7 +53,7 @@ pub fn init(fund: &Fund, accounts: &[AccountInfo], step: u64) -> ProgramResult {
         fund_info.init(&fund.name)?;
 
         // init fund token mint
-        msg!("Init fund token mint");
+        msg!("Init Fund token mint");
         let fund_token = Token::unpack(&fund_token_ref.try_borrow_data()?)?;
         if fund_token_mint.key != &fund_token.mint {
             msg!("Error: Invalid Fund token mint");

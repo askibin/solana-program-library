@@ -171,7 +171,7 @@ impl UnlockLiquidity for VaultInstruction {
             );
             vault_info.add_rewards(token_a_rewards, token_b_rewards)?;
 
-            // brun vault tokens
+            // burn vault tokens
             msg!(
                 "Burn Vault tokens from the user. vt_remove_amount: {}",
                 vt_remove_amount

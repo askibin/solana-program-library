@@ -288,7 +288,7 @@ impl<'a, 'b> FundInfo<'a, 'b> {
         .map(|_| ())
     }
 
-    pub fn set_withdrawal_limit(&mut self, withdrawal_limit: f64) -> ProgramResult {
+    pub fn set_withdrawal_limit_usd(&mut self, withdrawal_limit: f64) -> ProgramResult {
         if withdrawal_limit < 0.0 {
             return Err(ProgramError::InvalidArgument);
         }
@@ -579,10 +579,10 @@ impl<'a, 'b> FundInfo<'a, 'b> {
         Err(ProgramError::InvalidAccountData)
     }
 
-    pub fn get_withdrawal_limit(&self) -> Result<u64, ProgramError> {
+    pub fn get_withdrawal_limit_usd(&self) -> Result<f64, ProgramError> {
         if let Some(rec) = RefDB::read_at(&self.data, FundInfo::WITHDRAWAL_LIMIT_INDEX)? {
             if let Reference::U64 { data } = rec.reference {
-                return Ok(data);
+                return Ok(f64::from_bits(data));
             }
         }
         Err(ProgramError::InvalidAccountData)
