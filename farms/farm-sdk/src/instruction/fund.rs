@@ -402,7 +402,7 @@ impl FundInstruction {
 
             instruction_type_out[0] = FundInstructionType::DenyDeposit as u8;
 
-            pack_array_string64(&deny_reason, deny_reason_out);
+            pack_array_string64(deny_reason, deny_reason_out);
 
             Ok(FundInstruction::DENY_DEPOSIT_LEN)
         } else {
@@ -478,7 +478,7 @@ impl FundInstruction {
 
             instruction_type_out[0] = FundInstructionType::DenyWithdrawal as u8;
 
-            pack_array_string64(&deny_reason, deny_reason_out);
+            pack_array_string64(deny_reason, deny_reason_out);
 
             Ok(FundInstruction::DENY_WITHDRAWAL_LEN)
         } else {

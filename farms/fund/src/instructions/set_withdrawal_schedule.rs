@@ -2,22 +2,16 @@
 
 use {
     crate::fund_info::FundInfo,
-    solana_farm_sdk::{
-        fund::{Fund, FundSchedule},
-        instruction::fund::FundInstruction,
-        program::{clock, pda},
-        token::Token,
-    },
+    solana_farm_sdk::fund::{Fund, FundSchedule},
     solana_program::{
         account_info::AccountInfo, entrypoint::ProgramResult, msg, program_error::ProgramError,
-        pubkey::Pubkey,
     },
 };
 
 pub fn set_withdrawal_schedule(
-    fund: &Fund,
+    _fund: &Fund,
     fund_info: &mut FundInfo,
-    accounts: &[AccountInfo],
+    _accounts: &[AccountInfo],
     schedule: &FundSchedule,
 ) -> ProgramResult {
     msg!("Update Fund withdrawal parameters");

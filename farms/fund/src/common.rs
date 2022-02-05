@@ -2,10 +2,9 @@
 
 use {
     crate::fund_info::FundInfo,
-    pyth_client::{CorpAction, PriceStatus, PriceType},
+    pyth_client::{PriceStatus, PriceType},
     solana_farm_sdk::{
         fund::{Fund, FundCustody, FundCustodyType, FundUserInfo, OraclePrice},
-        id::zero,
         math,
         program::{account, clock},
         token::Token,
@@ -14,7 +13,6 @@ use {
         account_info::AccountInfo, clock::UnixTimestamp, entrypoint::ProgramResult, msg,
         program_error::ProgramError, pubkey::Pubkey,
     },
-    std::cmp,
 };
 
 pub fn check_wd_custody_accounts<'a, 'b>(
@@ -27,7 +25,7 @@ pub fn check_wd_custody_accounts<'a, 'b>(
     pyth_price_info: &'a AccountInfo<'b>,
 ) -> ProgramResult {
     //if custody_metadata.owner != &fund.fund_program_id
-    //    || &account::get_token_account_owner(custody_account)? != &fund.fund_program_id
+    //    || !account::check_token_account_owner(custody_account, &fund.fund_program_id)?
     //{
     //    msg!("Error: Invalid custody owner");
     //    return Err(ProgramError::IllegalOwner);
@@ -94,7 +92,7 @@ pub fn check_custody_account<'a, 'b>(
     custody_type: FundCustodyType,
 ) -> ProgramResult {
     //if custody_metadata.owner != &fund.fund_program_id
-    //    || &account::get_token_account_owner(custody_account)? != &fund.fund_program_id
+    //    || !account::check_token_account_owner(custody_account, &fund.fund_program_id)?
     //{
     //    msg!("Error: Invalid custody owner");
     //    return Err(ProgramError::IllegalOwner);
@@ -118,7 +116,6 @@ pub fn check_custody_account<'a, 'b>(
     let custody_seed_str: &[u8] = match custody_type {
         FundCustodyType::DepositWithdraw => b"fund_wd_custody_info",
         FundCustodyType::Trading => b"fund_td_custody_info",
-        _ => unreachable!(),
     };
     let custody_metadata_derived = Pubkey::create_program_address(
         &[
@@ -142,7 +139,7 @@ pub fn check_trading_custody<'a, 'b>(
     fund: &Fund,
     custody_account: &'a AccountInfo<'b>,
 ) -> ProgramResult {
-    if account::get_token_account_owner(custody_account)? != fund.fund_program_id
+    if !account::check_token_account_owner(custody_account, &fund.fund_program_id)?
     {
         msg!("Error: Invalid custody owner");
         return Err(ProgramError::IllegalOwner);
@@ -217,10 +214,7 @@ pub fn check_user_info_account<'a, 'b>(
     }
 }
 
-pub fn check_fund_token_mint<'a, 'b>(
-    fund: &Fund,
-    fund_token_mint: &'a AccountInfo<'b>,
-) -> ProgramResult {
+pub fn check_fund_token_mint(fund: &Fund, fund_token_mint: &AccountInfo) -> ProgramResult {
     //if account::get_mint_authority(fund_token_mint)? != &fund.fund_program_id {
     //    msg!("Error: Invalid Fund token mint authority");
     //    return Err(ProgramError::IllegalOwner);
@@ -260,26 +254,24 @@ pub fn check_assets_limit_usd(
 ) -> Result<(), ProgramError> {
     let current_assets_usd = fund_info.get_current_assets_usd()?;
     let assets_limit = fund_info.get_assets_limit_usd()?;
-    if assets_limit > 0.0 {
-        if assets_limit < deposit_value_usd + current_assets_usd {
-            let amount_left = if current_assets_usd < assets_limit {
-                assets_limit - current_assets_usd
-            } else {
-                0.0
-            };
-            msg!(
-                "Error: Fund assets limit reached ({}). Allowed max desposit USD: {}",
-                assets_limit,
-                amount_left
-            );
-            return Err(ProgramError::Custom(223));
-        }
+    if assets_limit > 0.0 && assets_limit < deposit_value_usd + current_assets_usd {
+        let amount_left = if current_assets_usd < assets_limit {
+            assets_limit - current_assets_usd
+        } else {
+            0.0
+        };
+        msg!(
+            "Error: Fund assets limit reached ({}). Allowed max desposit USD: {}",
+            assets_limit,
+            amount_left
+        );
+        return Err(ProgramError::Custom(223));
     }
     Ok(())
 }
 
-pub fn get_pyth_price<'a, 'b>(
-    pyth_price_info: &'a AccountInfo<'b>,
+pub fn get_pyth_price(
+    pyth_price_info: &AccountInfo,
     max_price_error: f64,
     max_price_age_sec: u64,
 ) -> Result<OraclePrice, ProgramError> {
@@ -321,12 +313,12 @@ pub fn get_pyth_price<'a, 'b>(
 }
 
 // Converts token amount to USD using price oracle
-pub fn get_asset_value_usd<'a, 'b>(
+pub fn get_asset_value_usd(
     amount: u64,
     decimals: u8,
     max_price_error: f64,
     max_price_age_sec: u64,
-    pyth_price_info: &'a AccountInfo<'b>,
+    pyth_price_info: &AccountInfo,
 ) -> Result<f64, ProgramError> {
     if amount == 0 {
         return Ok(0.0);
@@ -338,22 +330,22 @@ pub fn get_asset_value_usd<'a, 'b>(
 }
 
 // Converts USD amount to tokens using price oracle
-pub fn get_asset_value_tokens<'a, 'b>(
+pub fn get_asset_value_tokens(
     usd_amount: f64,
     token_decimals: u8,
     max_price_error: f64,
     max_price_age_sec: u64,
-    pyth_price_info: &'a AccountInfo<'b>,
+    pyth_price_info: &AccountInfo,
 ) -> Result<u64, ProgramError> {
     if usd_amount == 0.0 {
         return Ok(0);
     }
     let pyth_price = get_pyth_price(pyth_price_info, max_price_error, max_price_age_sec)?;
 
-    Ok(math::checked_as_u64(
+    math::checked_as_u64(
         usd_amount as f64 / pyth_price.price as f64
             * f64::powi(10.0, token_decimals as i32 - pyth_price.exponent),
-    )?)
+    )
 }
 
 pub fn get_fund_token_to_mint_amount(

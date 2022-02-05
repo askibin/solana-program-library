@@ -54,8 +54,8 @@ impl RemoveLiquidity for VaultInstruction {
             if !user_account.is_signer {
                 return Err(ProgramError::MissingRequiredSignature);
             }
-            if &account::get_token_account_owner(user_token_a_account)? != user_account.key
-                || &account::get_token_account_owner(user_token_b_account)? != user_account.key
+            if !account::check_token_account_owner(user_token_a_account, user_account.key)?
+                || !account::check_token_account_owner(user_token_b_account, user_account.key)?
             {
                 msg!("Error: Invalid token account owner");
                 return Err(ProgramError::IllegalOwner);

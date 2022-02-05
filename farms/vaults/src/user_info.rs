@@ -1,9 +1,9 @@
 //! User info account management.
 
 use {
-    crate::clock,
     solana_farm_sdk::{
         math::checked_add,
+        program::clock,
         refdb,
         refdb::{RefDB, Reference, ReferenceType},
         string::{str_to_as64, ArrayString64},

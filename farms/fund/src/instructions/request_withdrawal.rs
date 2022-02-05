@@ -10,22 +10,14 @@ use {
         token::Token,
     },
     solana_program::{
-        account_info::AccountInfo,
-        entrypoint::ProgramResult,
-        hash::Hasher,
-        instruction::{AccountMeta, Instruction},
-        msg,
-        program::invoke,
-        program_error::ProgramError,
-        pubkey::Pubkey,
-        system_program,
+        account_info::AccountInfo, entrypoint::ProgramResult, msg, program_error::ProgramError,
     },
 };
 
 pub fn request_withdrawal(fund: &Fund, accounts: &[AccountInfo], amount: u64) -> ProgramResult {
     //#[allow(clippy::deprecated_cfg_attr)]
     //#[cfg_attr(rustfmt, rustfmt_skip)]
-    if let [user_account, fund_metadata, fund_info_account, fund_authority, _spl_token_program, fund_token_mint, user_info_account, user_withdrawal_token_account, user_fund_token_account, custody_account, custody_fees_account, custody_metadata, custody_token_metadata, pyth_price_info] =
+    if let [user_account, _fund_metadata, fund_info_account, fund_authority, _spl_token_program, fund_token_mint, user_info_account, user_withdrawal_token_account, user_fund_token_account, custody_account, custody_fees_account, custody_metadata, custody_token_metadata, pyth_price_info] =
         accounts
     {
         // return early if withdrawals are not allowed

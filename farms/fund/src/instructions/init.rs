@@ -4,7 +4,6 @@ use {
     crate::fund_info::FundInfo,
     solana_farm_sdk::{
         fund::{Fund, FundAssets},
-        instruction::fund::FundInstruction,
         program::pda,
         token::Token,
     },
@@ -13,10 +12,10 @@ use {
     },
 };
 
-pub fn init(fund: &Fund, accounts: &[AccountInfo], step: u64) -> ProgramResult {
+pub fn init(fund: &Fund, accounts: &[AccountInfo], _step: u64) -> ProgramResult {
     //#[allow(clippy::deprecated_cfg_attr)]
     //#[cfg_attr(rustfmt, rustfmt_skip)]
-    if let [admin_account, _fund_metadata, fund_info_account, fund_authority, fund_program, _system_program, _spl_token_program, rent_program, fund_token_mint, fund_token_ref, vaults_assets_info, custodies_assets_info, liquidation_state] =
+    if let [admin_account, _fund_metadata, fund_info_account, fund_authority, fund_program, _system_program, _spl_token_program, rent_program, fund_token_mint, fund_token_ref, vaults_assets_info, custodies_assets_info, _liquidation_state] =
         accounts
     {
         // validate accounts

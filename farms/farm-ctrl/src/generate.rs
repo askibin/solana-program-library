@@ -21,7 +21,7 @@ use {
 };
 
 pub fn generate_fund(
-    client: &FarmClient,
+    _client: &FarmClient,
     _config: &Config,
     fund_address: &Pubkey,
     fund_name: &str,

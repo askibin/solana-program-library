@@ -24,11 +24,11 @@ use {
 #[derive(Deserialize, Debug)]
 struct JsonRaydiumLPToken {
     #[serde(deserialize_with = "as64_deserialize")]
-    symbol: ArrayString64,
+    _symbol: ArrayString64,
     #[serde(deserialize_with = "as64_deserialize")]
     name: ArrayString64,
-    coin: String,
-    pc: String,
+    _coin: String,
+    _pc: String,
     #[serde(rename = "mintAddress", deserialize_with = "pubkey_deserialize")]
     mint_address: Pubkey,
     decimals: u8,

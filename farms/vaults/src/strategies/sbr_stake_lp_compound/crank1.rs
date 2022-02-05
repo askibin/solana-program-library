@@ -1,7 +1,7 @@
 //! Crank step 1 instruction handler
 
 use {
-    crate::{clock::check_min_crank_interval, vault_info::VaultInfo},
+    crate::{strategies::common, vault_info::VaultInfo},
     solana_farm_sdk::{
         program::{account, protocol::saber},
         vault::{Vault, VaultStrategy},
@@ -58,7 +58,7 @@ pub fn crank1(vault: &Vault, accounts: &[AccountInfo]) -> ProgramResult {
         }
 
         let mut vault_info = VaultInfo::new(vault_info_account);
-        check_min_crank_interval(&vault_info)?;
+        common::check_min_crank_interval(&vault_info)?;
 
         // harvest
         let seeds: &[&[&[u8]]] = &[&[

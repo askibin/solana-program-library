@@ -15,6 +15,7 @@ pub enum VaultType {
     AmmStake,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
 pub enum VaultStrategy {
     StakeLpCompoundRewards {

@@ -4,19 +4,8 @@ mod utils;
 use {
     log::info,
     solana_farm_client::{client::FarmClient, error::FarmClientError},
-    solana_farm_sdk::{
-        fund::{
-            FundAssetsTrackingConfig, FundCustodyType, FundSchedule, OracleType,
-            DISCRIMINATOR_FUND_CUSTODY, DISCRIMINATOR_FUND_USER_INFO,
-        },
-        string::str_to_as64,
-    },
-    solana_sdk::{
-        clock::UnixTimestamp,
-        commitment_config::{CommitmentConfig, CommitmentLevel},
-        signature::Keypair,
-        signer::Signer,
-    },
+    solana_farm_sdk::fund::{FundCustodyType, FundSchedule},
+    solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair, signer::Signer},
 };
 
 #[test]
@@ -28,10 +17,10 @@ fn run_tests() -> Result<(), FarmClientError> {
     let (endpoint, admin_keypair) = utils::get_endpoint_and_keypair();
     let user_keypair = Keypair::new();
     let client = FarmClient::new_with_commitment(&endpoint, CommitmentConfig::confirmed());
-    let wallet = user_keypair.pubkey();
+    let _wallet = user_keypair.pubkey();
     let fund_name = "TestFund5".to_string(); //fixture::init_fund(&client, &admin_keypair, Some("TestFund5"), None)?;
     let fund = client.get_fund(&fund_name)?;
-    let fund_token = client.get_token_by_ref(&fund.fund_token_ref)?;
+    let _fund_token = client.get_token_by_ref(&fund.fund_token_ref)?;
     let fund_info = client.get_fund_info(&fund_name)?;
     println!("{:#?}", fund_info);
 

@@ -55,7 +55,7 @@ pub fn pubkey_map_to_string(map: &HashMap<String, Pubkey>) -> String {
         if s.len() != 1 {
             s += ",";
         }
-        s += format!("\"{}\":\"{}\"", key, val.to_string()).as_str();
+        s += format!("\"{}\":\"{}\"", key, val).as_str();
     }
     s += "}";
     s

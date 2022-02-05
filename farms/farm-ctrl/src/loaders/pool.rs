@@ -90,21 +90,21 @@ struct JsonRaydiumPool {
 
 #[derive(Deserialize, Debug)]
 struct JsonSaberPool {
-    name: String,
+    _name: String,
     tokens: Vec<GitToken>,
     #[serde(rename = "lpToken")]
     lp_token: GitToken,
     #[serde(deserialize_with = "pubkey_deserialize")]
-    quarry: Pubkey,
+    _quarry: Pubkey,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct JsonOrcaToken {
-    tag: String,
-    name: String,
+    _tag: String,
+    _name: String,
     #[serde(deserialize_with = "pubkey_deserialize")]
-    mint: Pubkey,
-    scale: u8,
+    _mint: Pubkey,
+    _scale: u8,
     #[serde(deserialize_with = "pubkey_deserialize")]
     addr: Pubkey,
 }

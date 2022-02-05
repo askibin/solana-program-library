@@ -23,11 +23,7 @@ impl Config {
         let cli_config = if let Some(config_file) = matches.value_of("config_file") {
             match solana_cli_config::Config::load(config_file) {
                 Err(e) => {
-                    panic!(
-                        "Failed to load config file \"{}\":{}",
-                        config_file,
-                        e.to_string()
-                    );
+                    panic!("Failed to load config file \"{}\":{}", config_file, e);
                 }
                 Ok(config) => config,
             }

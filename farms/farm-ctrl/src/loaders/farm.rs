@@ -26,7 +26,7 @@ struct JsonRaydiumFarm {
     reward_b: String,
     #[serde(rename = "isStake")]
     is_stake: bool,
-    fusion: bool,
+    _fusion: bool,
     legacy: bool,
     dual: bool,
     version: u8,
@@ -53,7 +53,7 @@ struct JsonRaydiumFarm {
 
 #[derive(Deserialize, Debug)]
 struct JsonSaberFarm {
-    name: String,
+    _name: String,
     tokens: Vec<GitToken>,
     #[serde(rename = "lpToken")]
     lp_token: GitToken,

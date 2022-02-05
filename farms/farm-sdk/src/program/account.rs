@@ -51,6 +51,15 @@ pub fn get_token_account_owner(token_account: &AccountInfo) -> Result<Pubkey, Pr
     Ok(Pubkey::new_from_array(*owner))
 }
 
+/// Checks Token account owner
+pub fn check_token_account_owner(
+    token_account: &AccountInfo,
+    expected_owner: &Pubkey,
+) -> Result<bool, ProgramError> {
+    Ok(token_account.owner == &spl_token::id()
+        && get_token_account_owner(token_account)? == *expected_owner)
+}
+
 /// Returns Token account mint.
 /// Extrats mint field without unpacking entire struct.
 pub fn get_token_account_mint(token_account: &AccountInfo) -> Result<Pubkey, ProgramError> {

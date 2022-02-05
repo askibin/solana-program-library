@@ -5,27 +5,19 @@ use {
     solana_farm_sdk::{
         fund::{Fund, FundUserInfo},
         math,
-        program::{account, clock, pda},
+        program::{account, pda},
         string::ArrayString64,
         token::Token,
     },
     solana_program::{
-        account_info::AccountInfo,
-        entrypoint::ProgramResult,
-        hash::Hasher,
-        instruction::{AccountMeta, Instruction},
-        msg,
-        program::invoke,
-        program_error::ProgramError,
-        pubkey::Pubkey,
-        system_program,
+        account_info::AccountInfo, entrypoint::ProgramResult, msg, program_error::ProgramError,
     },
 };
 
 pub fn approve_deposit(fund: &Fund, accounts: &[AccountInfo], amount: u64) -> ProgramResult {
     //#[allow(clippy::deprecated_cfg_attr)]
     //#[cfg_attr(rustfmt, rustfmt_skip)]
-    if let [admin_account, _fund_metadata, fund_info_account, fund_authority, _spl_token_program, fund_token_mint, user_account, user_info_account, user_deposit_token_account, user_fund_token_account, custody_account, custody_fees_account, custody_metadata, custody_token_metadata, pyth_price_info] =
+    if let [_admin_account, _fund_metadata, fund_info_account, fund_authority, _spl_token_program, fund_token_mint, user_account, user_info_account, user_deposit_token_account, user_fund_token_account, custody_account, custody_fees_account, custody_metadata, custody_token_metadata, pyth_price_info] =
         accounts
     {
         // validate params and accounts
@@ -40,7 +32,7 @@ pub fn approve_deposit(fund: &Fund, accounts: &[AccountInfo], amount: u64) -> Pr
             return Err(ProgramError::InvalidArgument);
         }
         if user_fund_token_account.data_is_empty()
-            || &account::get_token_account_owner(user_fund_token_account)? != user_account.key
+            || !account::check_token_account_owner(user_fund_token_account, user_account.key)?
         {
             msg!("Error: Invalid Fund token account owner");
             return Err(ProgramError::IllegalOwner);

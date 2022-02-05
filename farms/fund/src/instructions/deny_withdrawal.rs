@@ -19,7 +19,7 @@ pub fn deny_withdrawal(
 ) -> ProgramResult {
     //#[allow(clippy::deprecated_cfg_attr)]
     //#[cfg_attr(rustfmt, rustfmt_skip)]
-    if let [admin_account, _fund_metadata, fund_info_account, user_account, user_info_account, custody_token_metadata] =
+    if let [_admin_account, _fund_metadata, fund_info_account, user_account, user_info_account, custody_token_metadata] =
         accounts
     {
         // validate params and accounts

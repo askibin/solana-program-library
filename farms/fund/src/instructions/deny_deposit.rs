@@ -4,21 +4,11 @@ use {
     crate::{common, fund_info::FundInfo},
     solana_farm_sdk::{
         fund::{Fund, FundUserInfo},
-        math,
-        program::{account, clock, pda},
-        string::{str_to_as64, ArrayString64},
+        string::ArrayString64,
         token::Token,
     },
     solana_program::{
-        account_info::AccountInfo,
-        entrypoint::ProgramResult,
-        hash::Hasher,
-        instruction::{AccountMeta, Instruction},
-        msg,
-        program::invoke,
-        program_error::ProgramError,
-        pubkey::Pubkey,
-        system_program,
+        account_info::AccountInfo, entrypoint::ProgramResult, msg, program_error::ProgramError,
     },
 };
 
@@ -29,7 +19,7 @@ pub fn deny_deposit(
 ) -> ProgramResult {
     //#[allow(clippy::deprecated_cfg_attr)]
     //#[cfg_attr(rustfmt, rustfmt_skip)]
-    if let [admin_account, _fund_metadata, fund_info_account, user_account, user_info_account, custody_token_metadata] =
+    if let [_admin_account, _fund_metadata, fund_info_account, user_account, user_info_account, custody_token_metadata] =
         accounts
     {
         // validate params and accounts

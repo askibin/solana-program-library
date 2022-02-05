@@ -2,23 +2,18 @@ use {
     log::info,
     solana_farm_client::{client::FarmClient, error::FarmClientError},
     solana_farm_sdk::{
-        farm::{FarmRoute, FarmType},
         fund::{Fund, FundType},
-        git_token::GitToken,
         id::main_router_admin,
         program::pda::find_target_pda,
         refdb::StorageType,
-        string::{str_to_as64, to_pretty_json, ArrayString64},
+        string::{str_to_as64, ArrayString64},
         token::{Token, TokenType},
-        vault::{Vault, VaultStrategy, VaultType},
     },
-    solana_sdk::{
-        commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Keypair, signer::Signer,
-    },
-    std::collections::HashMap,
+    solana_sdk::{pubkey::Pubkey, signature::Keypair},
     std::str::FromStr,
 };
 
+#[allow(dead_code)]
 pub fn init_fund(
     client: &FarmClient,
     keypair: &Keypair,
@@ -125,7 +120,7 @@ pub fn init_fund(
     }
 
     info!("Initializing Fund {}", fund_name);
-    client.init_fund(keypair, &fund_name, 0)?;
+    client.init_fund(keypair, fund_name, 0)?;
 
     Ok(fund_name.to_string())
 }

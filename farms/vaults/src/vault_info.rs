@@ -335,7 +335,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data as UnixTimestamp);
             }
         }
-        return Err(ProgramError::InvalidAccountData);
+        Err(ProgramError::InvalidAccountData)
     }
 
     pub fn get_crank_step(&self) -> Result<u64, ProgramError> {
@@ -344,7 +344,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data);
             }
         }
-        return Err(ProgramError::InvalidAccountData);
+        Err(ProgramError::InvalidAccountData)
     }
 
     pub fn get_min_crank_interval(&self) -> Result<i64, ProgramError> {
@@ -353,7 +353,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data as i64);
             }
         }
-        return Err(ProgramError::InvalidAccountData);
+        Err(ProgramError::InvalidAccountData)
     }
 
     pub fn get_fee(&self) -> Result<f64, ProgramError> {
@@ -362,7 +362,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(f64::from_bits(data));
             }
         }
-        return Err(ProgramError::InvalidAccountData);
+        Err(ProgramError::InvalidAccountData)
     }
 
     pub fn get_external_fee(&self) -> Result<f64, ProgramError> {
@@ -371,7 +371,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(f64::from_bits(data));
             }
         }
-        return Err(ProgramError::InvalidAccountData);
+        Err(ProgramError::InvalidAccountData)
     }
 
     pub fn is_deposit_allowed(&self) -> Result<bool, ProgramError> {
@@ -380,7 +380,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data > 0);
             }
         }
-        return Err(ProgramError::InvalidAccountData);
+        Err(ProgramError::InvalidAccountData)
     }
 
     pub fn is_withdrawal_allowed(&self) -> Result<bool, ProgramError> {
@@ -389,7 +389,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data > 0);
             }
         }
-        return Err(ProgramError::InvalidAccountData);
+        Err(ProgramError::InvalidAccountData)
     }
 
     pub fn get_token_a_added(&self) -> Result<u64, ProgramError> {
@@ -398,7 +398,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data);
             }
         }
-        return Err(ProgramError::InvalidAccountData);
+        Err(ProgramError::InvalidAccountData)
     }
 
     pub fn get_token_b_added(&self) -> Result<u64, ProgramError> {
@@ -407,7 +407,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data);
             }
         }
-        return Err(ProgramError::InvalidAccountData);
+        Err(ProgramError::InvalidAccountData)
     }
 
     pub fn get_token_a_removed(&self) -> Result<u64, ProgramError> {
@@ -416,7 +416,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data);
             }
         }
-        return Err(ProgramError::InvalidAccountData);
+        Err(ProgramError::InvalidAccountData)
     }
 
     pub fn get_token_b_removed(&self) -> Result<u64, ProgramError> {
@@ -425,7 +425,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data);
             }
         }
-        return Err(ProgramError::InvalidAccountData);
+        Err(ProgramError::InvalidAccountData)
     }
 
     pub fn get_token_a_rewards(&self) -> Result<u64, ProgramError> {
@@ -434,7 +434,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data);
             }
         }
-        return Err(ProgramError::InvalidAccountData);
+        Err(ProgramError::InvalidAccountData)
     }
 
     pub fn get_token_b_rewards(&self) -> Result<u64, ProgramError> {
@@ -443,7 +443,7 @@ impl<'a, 'b> VaultInfo<'a, 'b> {
                 return Ok(data);
             }
         }
-        return Err(ProgramError::InvalidAccountData);
+        Err(ProgramError::InvalidAccountData)
     }
 
     // private helpers

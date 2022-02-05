@@ -1,24 +1,15 @@
 //! Cancel deposit to the Fund instruction handler
 
 use {
-    crate::{common, fund_info::FundInfo},
+    crate::common,
     solana_farm_sdk::{
         fund::{Fund, FundUserInfo},
-        math,
-        program::{account, clock, pda},
+        program::account,
         string::ArrayString64,
         token::Token,
     },
     solana_program::{
-        account_info::AccountInfo,
-        entrypoint::ProgramResult,
-        hash::Hasher,
-        instruction::{AccountMeta, Instruction},
-        msg,
-        program::invoke,
-        program_error::ProgramError,
-        pubkey::Pubkey,
-        system_program,
+        account_info::AccountInfo, entrypoint::ProgramResult, msg, program_error::ProgramError,
     },
 };
 

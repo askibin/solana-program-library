@@ -13,7 +13,6 @@ use {
     solana_sdk::{
         hash::Hasher,
         instruction::{AccountMeta, Instruction},
-        program_error::ProgramError,
         pubkey::Pubkey,
         system_program, sysvar,
     },
@@ -878,6 +877,7 @@ impl FarmClient {
     }
 
     /// Creates a new Instruction for tokens swap
+    #[allow(clippy::too_many_arguments)]
     pub fn new_instruction_fund_swap(
         &self,
         admin_address: &Pubkey,
@@ -906,9 +906,10 @@ impl FarmClient {
             }
             .to_vec()?,
             _ => {
-                return Err(FarmClientError::ValueError(
-                    format!("Unsupported protocol {} for Fund {}", protocol, fund_name).to_string(),
-                ));
+                return Err(FarmClientError::ValueError(format!(
+                    "Unsupported protocol {} for Fund {}",
+                    protocol, fund_name
+                )));
             }
         };
 

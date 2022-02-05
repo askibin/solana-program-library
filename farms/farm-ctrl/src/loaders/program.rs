@@ -12,7 +12,7 @@ use {
 #[derive(Deserialize, Debug)]
 struct JsonProgram {
     name: String,
-    description: String,
+    _description: String,
     program_type: ProgramIDType,
     #[serde(deserialize_with = "pubkey_deserialize")]
     address: Pubkey,
@@ -20,8 +20,8 @@ struct JsonProgram {
 
 #[derive(Deserialize, Debug)]
 struct JsonPrograms {
-    name: String,
-    timestamp: String,
+    _name: String,
+    _timestamp: String,
     programs: Vec<JsonProgram>,
 }
 

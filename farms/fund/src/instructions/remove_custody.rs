@@ -3,9 +3,8 @@
 use {
     crate::{common, fund_info::FundInfo},
     solana_farm_sdk::{
-        fund::{Fund, FundAssets, FundCustody, FundCustodyType, DISCRIMINATOR_FUND_CUSTODY},
-        instruction::fund::FundInstruction,
-        program::{account, clock, pda},
+        fund::{Fund, FundAssets, FundCustodyType},
+        program::{account, pda},
         token::Token,
     },
     solana_program::{

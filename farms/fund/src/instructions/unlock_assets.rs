@@ -8,11 +8,7 @@ use {
         token::Token,
     },
     solana_program::{
-        account_info::AccountInfo,
-        entrypoint::ProgramResult,
-        instruction::{AccountMeta, Instruction},
-        msg,
-        program_error::ProgramError,
+        account_info::AccountInfo, entrypoint::ProgramResult, msg, program_error::ProgramError,
     },
 };
 

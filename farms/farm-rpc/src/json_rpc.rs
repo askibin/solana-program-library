@@ -18,15 +18,14 @@ use {
     },
     serde_json::{from_str, from_value, json, Value},
     solana_account_decoder::parse_token::UiTokenAccount,
-    solana_farm_client::client::{FarmClient, FarmMap, PoolMap, PubkeyMap, TokenMap, VaultMap, FundMap},
+    solana_farm_client::client::{FarmClient, FarmMap, PoolMap, PubkeyMap, TokenMap, VaultMap},
     solana_farm_sdk::{
         farm::Farm,
         git_token::GitToken,
         pool::Pool,
         string::{instruction_to_string, pubkey_map_to_string},
         token::Token,
-        vault::{VaultUserInfo, Vault, VaultInfo},
-        fund::{FundUserInfo, Fund, FundInfo},
+        vault::{Vault, VaultInfo, VaultUserInfo},
     },
     solana_sdk::{
         commitment_config::CommitmentConfig, instruction::Instruction, pubkey::Pubkey,

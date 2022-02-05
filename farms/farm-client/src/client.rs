@@ -154,10 +154,10 @@
 use {
     crate::{cache::Cache, error::FarmClientError},
     arrayref::array_ref,
-    pyth_client::{CorpAction, PriceStatus, PriceType},
+    pyth_client::{PriceStatus, PriceType},
     solana_account_decoder::{
         parse_token::{parse_token, TokenAccountType, UiAccountState, UiTokenAccount},
-        UiAccountEncoding, UiDataSliceConfig,
+        UiAccountEncoding,
     },
     solana_client::{
         client_error::ClientErrorKind,
@@ -1277,7 +1277,7 @@ impl FarmClient {
         &self,
         token_account: &Pubkey,
     ) -> Result<f64, FarmClientError> {
-        let balance = self.rpc_client.get_token_account_balance(&token_account)?;
+        let balance = self.rpc_client.get_token_account_balance(token_account)?;
         if let Some(ui_amount) = balance.ui_amount {
             Ok(ui_amount)
         } else {
@@ -3102,7 +3102,6 @@ impl FarmClient {
         let custody_seed_str: &[u8] = match custody_type {
             FundCustodyType::DepositWithdraw => b"fund_wd_custody_fees_account",
             FundCustodyType::Trading => b"fund_td_custody_fees_account",
-            _ => unreachable!(),
         };
         Ok(Pubkey::find_program_address(
             &[
@@ -3127,7 +3126,6 @@ impl FarmClient {
         let custody_seed_str: &[u8] = match custody_type {
             FundCustodyType::DepositWithdraw => b"fund_wd_custody_info",
             FundCustodyType::Trading => b"fund_td_custody_info",
-            _ => unreachable!(),
         };
         Ok(Pubkey::find_program_address(
             &[
@@ -3336,7 +3334,7 @@ impl FarmClient {
         // create and send the instruction
         let inst = self.new_instruction_approve_deposit_fund(
             &admin_signer.pubkey(),
-            &user_address,
+            user_address,
             fund_name,
             token_name,
             ui_amount,
@@ -3356,7 +3354,7 @@ impl FarmClient {
         // create and send the instruction
         let inst = self.new_instruction_deny_deposit_fund(
             &admin_signer.pubkey(),
-            &user_address,
+            user_address,
             fund_name,
             token_name,
             deny_reason,
@@ -3455,7 +3453,7 @@ impl FarmClient {
         // create and send the instruction
         let inst = self.new_instruction_approve_withdrawal_fund(
             &admin_signer.pubkey(),
-            &user_address,
+            user_address,
             fund_name,
             token_name,
             ui_amount,
@@ -3475,7 +3473,7 @@ impl FarmClient {
         // create and send the instruction
         let inst = self.new_instruction_deny_withdrawal_fund(
             &admin_signer.pubkey(),
-            &user_address,
+            user_address,
             fund_name,
             token_name,
             deny_reason,
@@ -3534,6 +3532,7 @@ impl FarmClient {
     }
 
     /// Swap tokens in the Fund
+    #[allow(clippy::too_many_arguments)]
     pub fn fund_swap(
         &self,
         admin_signer: &dyn Signer,
@@ -3559,7 +3558,7 @@ impl FarmClient {
 
         // check source custody
         if self
-            .get_fund_custody(&fund_name, from_token, FundCustodyType::Trading)
+            .get_fund_custody(fund_name, from_token, FundCustodyType::Trading)
             .is_err()
         {
             return Err(FarmClientError::RecordNotFound(format!(
@@ -3571,7 +3570,7 @@ impl FarmClient {
         // check target custody
         let mut inst = Vec::<Instruction>::new();
         if self
-            .get_fund_custody(&fund_name, to_token, FundCustodyType::Trading)
+            .get_fund_custody(fund_name, to_token, FundCustodyType::Trading)
             .is_err()
         {
             inst.push(self.new_instruction_add_fund_custody(
@@ -3684,9 +3683,9 @@ impl FarmClient {
                 )))
             }
         };
-        Ok(Pubkey::from_str(acc).map_err(|_| {
+        Pubkey::from_str(acc).map_err(|_| {
             FarmClientError::ValueError(format!("Failed to convert the String to a Pubkey {}", acc))
-        })?)
+        })
     }
 
     pub fn get_oracle_price(

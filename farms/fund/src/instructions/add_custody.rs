@@ -4,8 +4,7 @@ use {
     crate::fund_info::FundInfo,
     solana_farm_sdk::{
         fund::{Fund, FundAssets, FundCustody, FundCustodyType, DISCRIMINATOR_FUND_CUSTODY},
-        instruction::fund::FundInstruction,
-        program::{clock, pda},
+        program::pda,
         token::Token,
     },
     solana_program::{
@@ -55,7 +54,6 @@ pub fn add_custody(
         let custody_seed_str: &[u8] = match custody_type {
             FundCustodyType::DepositWithdraw => b"fund_wd_custody_info",
             FundCustodyType::Trading => b"fund_td_custody_info",
-            _ => unreachable!(),
         };
         let custody_seeds = &[
             custody_seed_str,
@@ -117,7 +115,6 @@ pub fn add_custody(
         let custody_seed_str: &[u8] = match custody_type {
             FundCustodyType::DepositWithdraw => b"fund_wd_custody_fees_account",
             FundCustodyType::Trading => b"fund_td_custody_fees_account",
-            _ => unreachable!(),
         };
         pda::init_token_account(
             admin_account,

@@ -3,30 +3,19 @@
 use {
     crate::{common, fund_info::FundInfo},
     solana_farm_sdk::{
-        fund::{Fund, FundCustody, FundUserInfo},
-        math,
-        program::{account, clock, pda},
-        string::ArrayString64,
+        fund::{Fund, FundCustody},
+        program::clock,
         token::Token,
     },
     solana_program::{
-        account_info::AccountInfo,
-        entrypoint::ProgramResult,
-        hash::Hasher,
-        instruction::{AccountMeta, Instruction},
-        log::sol_log_compute_units,
-        msg,
-        program::invoke,
-        program_error::ProgramError,
-        pubkey::Pubkey,
-        system_program,
+        account_info::AccountInfo, entrypoint::ProgramResult, msg, program_error::ProgramError,
     },
 };
 
 pub fn update_assets_with_custody(fund: &Fund, accounts: &[AccountInfo]) -> ProgramResult {
     //#[allow(clippy::deprecated_cfg_attr)]
     //#[cfg_attr(rustfmt, rustfmt_skip)]
-    if let [user_account, _fund_metadata, fund_info_account, custodies_assets_info, custody_account, custody_metadata, custody_token_metadata] =
+    if let [_user_account, _fund_metadata, fund_info_account, _custodies_assets_info, custody_account, custody_metadata, custody_token_metadata] =
         accounts
     {
         // validate params and accounts

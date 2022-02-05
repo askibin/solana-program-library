@@ -1,7 +1,7 @@
 //! Crank step 4 instruction handler
 
 use {
-    crate::{clock::check_min_crank_interval, vault_info::VaultInfo},
+    crate::{strategies::common, vault_info::VaultInfo},
     solana_farm_sdk::{
         program::{account, protocol::saber},
         vault::{Vault, VaultStrategy},
@@ -64,7 +64,7 @@ pub fn crank4(vault: &Vault, accounts: &[AccountInfo]) -> ProgramResult {
         }
 
         let mut vault_info = VaultInfo::new(vault_info_account);
-        check_min_crank_interval(&vault_info)?;
+        common::check_min_crank_interval(&vault_info)?;
 
         // read balances
         let token_a_balance = account::get_token_balance(token_a_custody)?;
