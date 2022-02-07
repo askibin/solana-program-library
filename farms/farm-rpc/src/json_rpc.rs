@@ -192,6 +192,28 @@ impl<'r> Responder<'r, 'static> for JsonWithInstruction {
     }
 }
 
+#[derive(Debug)]
+struct JsonWithInstructions {
+    data: String,
+}
+
+impl JsonWithInstructions {
+    pub fn new(data: &[Instruction]) -> Self {
+        Self {
+            data: data.iter().map(instruction_to_string).collect(),
+        }
+    }
+}
+
+impl<'r> Responder<'r, 'static> for JsonWithInstructions {
+    fn respond_to(self, request: &'r Request<'_>) -> response::Result<'static> {
+        Response::build()
+            .merge(self.data.respond_to(request)?)
+            .header(ContentType::JSON)
+            .ok()
+    }
+}
+
 // Routes
 
 /// Returns Token metadata from Github
@@ -1632,6 +1654,32 @@ async fn new_instruction_add_liquidity_vault(
     Ok(JsonWithInstruction::new(&instruction))
 }
 
+/// Creates new instructions for adding liquidity to the Vault
+#[get("/new_instructions_add_liquidity_vault?<wallet_address>&<vault_name>&<max_token_a_ui_amount>&<max_token_b_ui_amount>")]
+async fn new_instructions_add_liquidity_vault(
+    wallet_address: Option<PubkeyParam>,
+    vault_name: &str,
+    max_token_a_ui_amount: f64,
+    max_token_b_ui_amount: f64,
+    farm_client: &State<FarmClientArc>,
+) -> Result<JsonWithInstructions, NotFound<String>> {
+    let wallet_address = check_unwrap_pubkey(wallet_address, "wallet_address")?;
+    let farm_client = farm_client
+        .inner()
+        .lock()
+        .map_err(|e| NotFound(e.to_string()))?;
+    let instructions = farm_client
+        .new_instructions_add_liquidity_vault(
+            &wallet_address,
+            vault_name,
+            max_token_a_ui_amount,
+            max_token_b_ui_amount,
+        )
+        .map_err(|e| NotFound(e.to_string()))?;
+
+    Ok(JsonWithInstructions::new(&instructions))
+}
+
 /// Creates a new Instruction for locking liquidity in the Vault
 #[get("/new_instruction_lock_liquidity_vault?<wallet_address>&<vault_name>&<ui_amount>")]
 async fn new_instruction_lock_liquidity_vault(
@@ -2006,6 +2054,7 @@ pub async fn stage(config: &Config) -> AdHoc {
                     new_instruction_close_token_account,
                     new_instruction_user_init_vault,
                     new_instruction_add_liquidity_vault,
+                    new_instructions_add_liquidity_vault,
                     new_instruction_lock_liquidity_vault,
                     new_instruction_unlock_liquidity_vault,
                     new_instruction_remove_liquidity_vault,

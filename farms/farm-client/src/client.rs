@@ -1520,6 +1520,22 @@ impl FarmClient {
         max_token_a_ui_amount: f64,
         max_token_b_ui_amount: f64,
     ) -> Result<Signature, FarmClientError> {
+        let inst = self.new_instructions_add_liquidity_vault(
+            &signer.pubkey(),
+            vault_name,
+            max_token_a_ui_amount,
+            max_token_b_ui_amount,
+        )?;
+        self.sign_and_send_instructions(&[signer], inst.as_slice())
+    }
+
+    pub fn new_instructions_add_liquidity_vault(
+        &self,
+        wallet_address: &Pubkey,
+        vault_name: &str,
+        max_token_a_ui_amount: f64,
+        max_token_b_ui_amount: f64,
+    ) -> Result<Vec<Instruction>, FarmClientError> {
         if max_token_a_ui_amount < 0.0
             || max_token_b_ui_amount < 0.0
             || (max_token_a_ui_amount == 0.0 && max_token_b_ui_amount == 0.0)
@@ -1554,7 +1570,7 @@ impl FarmClient {
         // check user accounts
         let mut inst = Vec::<Instruction>::new();
         self.check_vault_accounts(
-            signer,
+            wallet_address,
             vault_name,
             token_a_ui_amount,
             token_b_ui_amount,
@@ -1564,11 +1580,6 @@ impl FarmClient {
             &mut inst,
         )?;
 
-        if !inst.is_empty() {
-            self.sign_and_send_instructions(&[signer], inst.as_slice())?;
-            inst.clear();
-        }
-
         // check if tokens must be wrapped to Saber decimal token
         if is_saber_vault {
             let pool_name = self.get_underlying_pool(vault_name)?.name.to_string();
@@ -1576,7 +1587,7 @@ impl FarmClient {
                 self.pool_has_saber_wrapped_tokens(&pool_name)?;
             if is_token_a_wrapped && max_token_a_ui_amount > 0.0 {
                 inst.push(self.new_instruction_wrap_token(
-                    &signer.pubkey(),
+                    wallet_address,
                     &pool_name,
                     TokenSelector::TokenA,
                     max_token_a_ui_amount,
@@ -1584,7 +1595,7 @@ impl FarmClient {
             }
             if is_token_b_wrapped && max_token_b_ui_amount > 0.0 {
                 inst.push(self.new_instruction_wrap_token(
-                    &signer.pubkey(),
+                    wallet_address,
                     &pool_name,
                     TokenSelector::TokenB,
                     max_token_b_ui_amount,
@@ -1594,25 +1605,24 @@ impl FarmClient {
 
         // insert add liquidity instruction
         inst.push(self.new_instruction_add_liquidity_vault(
-            &signer.pubkey(),
+            wallet_address,
             vault_name,
             max_token_a_ui_amount,
             max_token_b_ui_amount,
         )?);
         if is_token_a_sol || is_token_b_sol {
-            inst.push(self.new_instruction_close_token_account(&signer.pubkey(), "SOL")?);
+            inst.push(self.new_instruction_close_token_account(wallet_address, "SOL")?);
         }
 
         // lock liquidity if required by the vault
         let vault = self.get_vault(vault_name)?;
         if vault.lock_required {
             let lp_debt_initial = self
-                .get_vault_user_info(&signer.pubkey(), vault_name)?
+                .get_vault_user_info(wallet_address, vault_name)?
                 .lp_tokens_debt;
-            let _ = self.sign_and_send_instructions(&[signer], inst.as_slice())?;
 
             let lp_debt = self
-                .get_vault_user_info(&signer.pubkey(), vault_name)?
+                .get_vault_user_info(wallet_address, vault_name)?
                 .lp_tokens_debt;
             if lp_debt > lp_debt_initial {
                 let pool_token_decimals = self.get_vault_lp_token_decimals(vault_name)?;
@@ -1622,19 +1632,18 @@ impl FarmClient {
                 );
 
                 let lock_inst = self.new_instruction_lock_liquidity_vault(
-                    &signer.pubkey(),
+                    wallet_address,
                     vault_name,
                     locked_amount,
                 )?;
-                self.sign_and_send_instructions(&[signer], &[lock_inst])
+                inst.push(lock_inst);
             } else {
-                Err(FarmClientError::InsufficientBalance(
+                return Err(FarmClientError::InsufficientBalance(
                     "No tokens were locked".to_string(),
-                ))
+                ));
             }
-        } else {
-            self.sign_and_send_instructions(&[signer], inst.as_slice())
         }
+        return Ok(inst);
     }
 
     /// Adds locked liquidity to the Vault.
@@ -1647,7 +1656,16 @@ impl FarmClient {
     ) -> Result<Signature, FarmClientError> {
         // check user accounts
         let mut inst = Vec::<Instruction>::new();
-        self.check_vault_accounts(signer, vault_name, 0.0, 0.0, 0.0, true, false, &mut inst)?;
+        self.check_vault_accounts(
+            &signer.pubkey(),
+            vault_name,
+            0.0,
+            0.0,
+            0.0,
+            true,
+            false,
+            &mut inst,
+        )?;
         if !inst.is_empty() {
             self.sign_and_send_instructions(&[signer], inst.as_slice())?;
             inst.clear();
@@ -1681,31 +1699,43 @@ impl FarmClient {
         vault_name: &str,
         ui_amount: f64,
     ) -> Result<Signature, FarmClientError> {
+        let inst =
+            self.new_instructions_remove_liquidity_vault(&signer.pubkey(), vault_name, ui_amount)?;
+        self.sign_and_send_instructions(&[signer], inst.as_slice())
+    }
+
+    /// Removes liquidity from the Vault
+    pub fn new_instructions_remove_liquidity_vault(
+        &self,
+        wallet_address: &Pubkey,
+        vault_name: &str,
+        ui_amount: f64,
+    ) -> Result<Vec<Instruction>, FarmClientError> {
         // check user accounts
         let vault = self.get_vault(vault_name)?;
         let mut inst = Vec::<Instruction>::new();
         self.check_vault_accounts(
-            signer, vault_name, 0.0, 0.0, ui_amount, true, false, &mut inst,
+            wallet_address,
+            vault_name,
+            0.0,
+            0.0,
+            ui_amount,
+            true,
+            false,
+            &mut inst,
         )?;
-        if !inst.is_empty() {
-            self.sign_and_send_instructions(&[signer], inst.as_slice())?;
-            inst.clear();
-        }
 
         // unlock liquidity first if required by the vault
         let mut unlocked_amount = ui_amount;
         if vault.unlock_required {
             let lp_debt_initial = self
-                .get_vault_user_info(&signer.pubkey(), vault_name)?
+                .get_vault_user_info(wallet_address, vault_name)?
                 .lp_tokens_debt;
-            let unlock_inst = self.new_instruction_unlock_liquidity_vault(
-                &signer.pubkey(),
-                vault_name,
-                ui_amount,
-            )?;
-            self.sign_and_send_instructions(&[signer], &[unlock_inst])?;
+            let unlock_inst =
+                self.new_instruction_unlock_liquidity_vault(wallet_address, vault_name, ui_amount)?;
+            inst.push(unlock_inst);
             let lp_debt = self
-                .get_vault_user_info(&signer.pubkey(), vault_name)?
+                .get_vault_user_info(wallet_address, vault_name)?
                 .lp_tokens_debt;
             if lp_debt > lp_debt_initial {
                 let pool_token_decimals = self.get_vault_lp_token_decimals(vault_name)?;
@@ -1722,7 +1752,7 @@ impl FarmClient {
 
         // remove liquidity
         inst.push(self.new_instruction_remove_liquidity_vault(
-            &signer.pubkey(),
+            wallet_address,
             vault_name,
             unlocked_amount,
         )?);
@@ -1735,7 +1765,7 @@ impl FarmClient {
 
         if is_token_a_wrapped {
             inst.push(self.new_instruction_unwrap_token(
-                &signer.pubkey(),
+                wallet_address,
                 &pool_name,
                 TokenSelector::TokenA,
                 0.0,
@@ -1743,17 +1773,17 @@ impl FarmClient {
         }
         if is_token_b_wrapped {
             inst.push(self.new_instruction_unwrap_token(
-                &signer.pubkey(),
+                wallet_address,
                 &pool_name,
                 TokenSelector::TokenB,
                 0.0,
             )?);
         }
         if is_token_a_sol || is_token_b_sol {
-            inst.push(self.new_instruction_close_token_account(&signer.pubkey(), "SOL")?);
+            inst.push(self.new_instruction_close_token_account(wallet_address, "SOL")?);
         }
 
-        self.sign_and_send_instructions(&[signer], inst.as_slice())
+        Ok(inst)
     }
 
     /// Removes unlocked liquidity from the Vault.
@@ -1764,18 +1794,37 @@ impl FarmClient {
         vault_name: &str,
         ui_amount: f64,
     ) -> Result<Signature, FarmClientError> {
+        let inst = self.new_instructions_remove_unlocked_liquidity_vault(
+            &signer.pubkey(),
+            vault_name,
+            ui_amount,
+        )?;
+        self.sign_and_send_instructions(&[signer], inst.as_slice())
+    }
+
+    pub fn new_instructions_remove_unlocked_liquidity_vault(
+        &self,
+        wallet_address: &Pubkey,
+        vault_name: &str,
+        ui_amount: f64,
+    ) -> Result<Vec<Instruction>, FarmClientError> {
         // check user accounts
         let mut inst = Vec::<Instruction>::new();
-        self.check_vault_accounts(signer, vault_name, 0.0, 0.0, 0.0, false, false, &mut inst)?;
-        if !inst.is_empty() {
-            self.sign_and_send_instructions(&[signer], inst.as_slice())?;
-            inst.clear();
-        }
+        self.check_vault_accounts(
+            wallet_address,
+            vault_name,
+            0.0,
+            0.0,
+            0.0,
+            false,
+            false,
+            &mut inst,
+        )?;
 
         // check if the user has unlocked balance
         if ui_amount > 0.0 {
             let lp_debt = self
-                .get_vault_user_info(&signer.pubkey(), vault_name)?
+                .get_vault_user_info(wallet_address, vault_name)?
                 .lp_tokens_debt;
             let pool_token_decimals = self.get_vault_lp_token_decimals(vault_name)?;
             if self.tokens_to_ui_amount_with_decimals(lp_debt, pool_token_decimals) < ui_amount {
@@ -1786,7 +1835,7 @@ impl FarmClient {
         }
 
         inst.push(self.new_instruction_remove_liquidity_vault(
-            &signer.pubkey(),
+            wallet_address,
             vault_name,
             ui_amount,
         )?);
@@ -1799,7 +1848,7 @@ impl FarmClient {
 
         if is_token_a_wrapped {
             inst.push(self.new_instruction_unwrap_token(
-                &signer.pubkey(),
+                wallet_address,
                 &pool_name,
                 TokenSelector::TokenA,
                 0.0,
@@ -1807,17 +1856,17 @@ impl FarmClient {
         }
         if is_token_b_wrapped {
             inst.push(self.new_instruction_unwrap_token(
-                &signer.pubkey(),
+                wallet_address,
                 &pool_name,
                 TokenSelector::TokenB,
                 0.0,
             )?);
         }
         if is_token_a_sol || is_token_b_sol {
-            inst.push(self.new_instruction_close_token_account(&signer.pubkey(), "SOL")?);
+            inst.push(self.new_instruction_close_token_account(wallet_address, "SOL")?);
         }
 
-        self.sign_and_send_instructions(&[signer], inst.as_slice())
+        Ok(inst)
     }
 
     /// Adds liquidity to the Pool.
@@ -2139,7 +2188,9 @@ impl FarmClient {
 
     /// Reads records from the RefDB PDA into a Pubkey map
     pub fn get_refdb_pubkey_map(&self, refdb_name: &str) -> Result<PubkeyMap, FarmClientError> {
+        println!("name {}", refdb_name);
         let refdb_address = find_refdb_pda(refdb_name).0;
+        println!("address {}", refdb_address.to_string());
         let data = self.rpc_client.get_account_data(&refdb_address)?;
         if !RefDB::is_initialized(data.as_slice()) {
             return Err(ProgramError::UninitializedAccount.into());
@@ -4972,7 +5023,7 @@ impl FarmClient {
     #[allow(clippy::too_many_arguments)]
     fn check_vault_accounts(
         &self,
-        signer: &dyn Signer,
+        wallet_address: &Pubkey,
         vault_name: &str,
         ui_amount_token_a: f64,
         ui_amount_token_b: f64,
@@ -4993,37 +5044,26 @@ impl FarmClient {
 
         if check_vt_token {
             let _ = self.check_token_account(
-                &signer.pubkey(),
+                wallet_address,
                 &vault_token,
                 ui_amount_vt_token,
                 instruction_vec,
             )?;
         }
         if check_lp_token {
-            let _ = self.check_token_account(&signer.pubkey(), &lp_token, 0.0, instruction_vec)?;
+            let _ = self.check_token_account(wallet_address, &lp_token, 0.0, instruction_vec)?;
         }
+        let _ = self.check_token_account(wallet_address, &token_a_reward, 0.0, instruction_vec)?;
+        let _ = self.check_token_account(wallet_address, &token_b_reward, 0.0, instruction_vec)?;
         let _ =
-            self.check_token_account(&signer.pubkey(), &token_a_reward, 0.0, instruction_vec)?;
+            self.check_token_account(wallet_address, &token_a, ui_amount_token_a, instruction_vec)?;
         let _ =
-            self.check_token_account(&signer.pubkey(), &token_b_reward, 0.0, instruction_vec)?;
-        let _ = self.check_token_account(
-            &signer.pubkey(),
-            &token_a,
-            ui_amount_token_a,
-            instruction_vec,
-        )?;
-        let _ = self.check_token_account(
-            &signer.pubkey(),
-            &token_b,
-            ui_amount_token_b,
-            instruction_vec,
-        )?;
+            self.check_token_account(wallet_address, &token_b, ui_amount_token_b, instruction_vec)?;
 
-        let user_info_account = self.get_vault_user_info_account(&signer.pubkey(), vault_name)?;
+        let user_info_account = self.get_vault_user_info_account(wallet_address, vault_name)?;
         let data = self.rpc_client.get_account_data(&user_info_account);
         if data.is_err() || !RefDB::is_initialized(data.unwrap().as_slice()) {
-            instruction_vec
-                .push(self.new_instruction_user_init_vault(&signer.pubkey(), vault_name)?);
+            instruction_vec.push(self.new_instruction_user_init_vault(wallet_address, vault_name)?);
         }
 
         Ok(())
