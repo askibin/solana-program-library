@@ -94,6 +94,124 @@ impl FarmClient {
         })
     }
 
+    /// Creates a new complete set of Instructions for adding liquidity to the Vault
+    pub fn new_instructions_add_liquidity_vault(
+        &self,
+        wallet_address: &Pubkey,
+        vault_name: &str,
+        max_token_a_ui_amount: f64,
+        max_token_b_ui_amount: f64,
+    ) -> Result<Vec<Instruction>, FarmClientError> {
+        if max_token_a_ui_amount < 0.0
+            || max_token_b_ui_amount < 0.0
+            || (max_token_a_ui_amount == 0.0 && max_token_b_ui_amount == 0.0)
+        {
+            return Err(FarmClientError::ValueError(format!(
+                "Invalid add liquidity amounts {} and {} specified for Vault {}: Must be greater or equal to zero and at least one non-zero.",
+                max_token_a_ui_amount, max_token_b_ui_amount, vault_name
+            )));
+        }
+        // if one of the tokens is SOL and amount is zero, we need to estimate that
+        // amount to get it transfered to WSOL
+        let is_saber_vault = vault_name.starts_with("SBR.");
+        let (is_token_a_sol, is_token_b_sol) = self.vault_has_sol_tokens(vault_name)?;
+        let token_a_ui_amount = if max_token_a_ui_amount == 0.0 && is_token_a_sol && !is_saber_vault
+        {
+            let pool_price = self.get_vault_price(vault_name)?;
+            if pool_price > 0.0 {
+                max_token_b_ui_amount * 1.03 / pool_price
+            } else {
+                0.0
+            }
+        } else {
+            max_token_a_ui_amount
+        };
+        let token_b_ui_amount = if max_token_b_ui_amount == 0.0 && is_token_b_sol && !is_saber_vault
+        {
+            max_token_a_ui_amount * self.get_vault_price(vault_name)? * 1.03
+        } else {
+            max_token_b_ui_amount
+        };
+
+        // check user accounts
+        let mut inst = Vec::<Instruction>::new();
+        self.check_vault_accounts(
+            wallet_address,
+            vault_name,
+            token_a_ui_amount,
+            token_b_ui_amount,
+            0.0,
+            true,
+            true,
+            &mut inst,
+        )?;
+
+        // check if tokens must be wrapped to Saber decimal token
+        if is_saber_vault {
+            let pool_name = self.get_underlying_pool(vault_name)?.name.to_string();
+            let (is_token_a_wrapped, is_token_b_wrapped) =
+                self.pool_has_saber_wrapped_tokens(&pool_name)?;
+            if is_token_a_wrapped && max_token_a_ui_amount > 0.0 {
+                inst.push(self.new_instruction_wrap_token(
+                    wallet_address,
+                    &pool_name,
+                    TokenSelector::TokenA,
+                    max_token_a_ui_amount,
+                )?);
+            }
+            if is_token_b_wrapped && max_token_b_ui_amount > 0.0 {
+                inst.push(self.new_instruction_wrap_token(
+                    wallet_address,
+                    &pool_name,
+                    TokenSelector::TokenB,
+                    max_token_b_ui_amount,
+                )?);
+            }
+        }
+
+        // insert add liquidity instruction
+        inst.push(self.new_instruction_add_liquidity_vault(
+            wallet_address,
+            vault_name,
+            max_token_a_ui_amount,
+            max_token_b_ui_amount,
+        )?);
+        if is_token_a_sol || is_token_b_sol {
+            inst.push(self.new_instruction_close_token_account(wallet_address, "SOL")?);
+        }
+
+        // lock liquidity if required by the vault
+        let vault = self.get_vault(vault_name)?;
+        if vault.lock_required {
+            let lp_debt_initial = self
+                .get_vault_user_info(wallet_address, vault_name)?
+                .lp_tokens_debt;
+
+            let lp_debt = self
+                .get_vault_user_info(wallet_address, vault_name)?
+                .lp_tokens_debt;
+            if lp_debt > lp_debt_initial {
+                let pool_token_decimals = self.get_vault_lp_token_decimals(vault_name)?;
+                let locked_amount = self.tokens_to_ui_amount_with_decimals(
+                    lp_debt - lp_debt_initial,
+                    pool_token_decimals,
+                );
+
+                let lock_inst = self.new_instruction_lock_liquidity_vault(
+                    wallet_address,
+                    vault_name,
+                    locked_amount,
+                )?;
+                inst.push(lock_inst);
+            } else {
+                return Err(FarmClientError::InsufficientBalance(
+                    "No tokens were locked".to_string(),
+                ));
+            }
+        }
+        return Ok(inst);
+    }
+
     /// Creates a new Instruction for locking liquidity in the Vault
     pub fn new_instruction_lock_liquidity_vault(
         &self,
@@ -210,6 +328,156 @@ impl FarmClient {
             data,
             accounts,
         })
+    }
+
+    /// Create a new complete set of Instructions for removing unlocked liquidity from the Vault
+    pub fn new_instructions_remove_unlocked_liquidity_vault(
+        &self,
+        wallet_address: &Pubkey,
+        vault_name: &str,
+        ui_amount: f64,
+    ) -> Result<Vec<Instruction>, FarmClientError> {
+        // check user accounts
+        let mut inst = Vec::<Instruction>::new();
+        self.check_vault_accounts(
+            wallet_address,
+            vault_name,
+            0.0,
+            0.0,
+            0.0,
+            false,
+            false,
+            &mut inst,
+        )?;
+
+        // check if the user has unlocked balance
+        if ui_amount > 0.0 {
+            let lp_debt = self
+                .get_vault_user_info(wallet_address, vault_name)?
+                .lp_tokens_debt;
+            let pool_token_decimals = self.get_vault_lp_token_decimals(vault_name)?;
+            if self.tokens_to_ui_amount_with_decimals(lp_debt, pool_token_decimals) < ui_amount {
+                return Err(FarmClientError::InsufficientBalance(
+                    "Not enough unlocked tokens to remove".to_string(),
+                ));
+            }
+        }
+
+        inst.push(self.new_instruction_remove_liquidity_vault(
+            wallet_address,
+            vault_name,
+            ui_amount,
+        )?);
+
+        // check if tokens need to be unwrapped
+        let (is_token_a_sol, is_token_b_sol) = self.vault_has_sol_tokens(vault_name)?;
+        let pool_name = self.get_underlying_pool(vault_name)?.name.to_string();
+        let (is_token_a_wrapped, is_token_b_wrapped) =
+            self.pool_has_saber_wrapped_tokens(&pool_name)?;
+
+        if is_token_a_wrapped {
+            inst.push(self.new_instruction_unwrap_token(
+                wallet_address,
+                &pool_name,
+                TokenSelector::TokenA,
+                0.0,
+            )?);
+        }
+        if is_token_b_wrapped {
+            inst.push(self.new_instruction_unwrap_token(
+                wallet_address,
+                &pool_name,
+                TokenSelector::TokenB,
+                0.0,
+            )?);
+        }
+        if is_token_a_sol || is_token_b_sol {
+            inst.push(self.new_instruction_close_token_account(wallet_address, "SOL")?);
+        }
+
+        Ok(inst)
+    }
+
+    /// Creates a new complete set of Instructions for removing liquidity from the Vault
+    pub fn new_instructions_remove_liquidity_vault(
+        &self,
+        wallet_address: &Pubkey,
+        vault_name: &str,
+        ui_amount: f64,
+    ) -> Result<Vec<Instruction>, FarmClientError> {
+        // check user accounts
+        let vault = self.get_vault(vault_name)?;
+        let mut inst = Vec::<Instruction>::new();
+        self.check_vault_accounts(
+            wallet_address,
+            vault_name,
+            0.0,
+            0.0,
+            ui_amount,
+            true,
+            false,
+            &mut inst,
+        )?;
+
+        // unlock liquidity first if required by the vault
+        let mut unlocked_amount = ui_amount;
+        if vault.unlock_required {
+            let lp_debt_initial = self
+                .get_vault_user_info(wallet_address, vault_name)?
+                .lp_tokens_debt;
+            let unlock_inst =
+                self.new_instruction_unlock_liquidity_vault(wallet_address, vault_name, ui_amount)?;
+            inst.push(unlock_inst);
+            let lp_debt = self
+                .get_vault_user_info(wallet_address, vault_name)?
+                .lp_tokens_debt;
+            if lp_debt > lp_debt_initial {
+                let pool_token_decimals = self.get_vault_lp_token_decimals(vault_name)?;
+                unlocked_amount = self.tokens_to_ui_amount_with_decimals(
+                    lp_debt - lp_debt_initial,
+                    pool_token_decimals,
+                );
+            } else {
+                return Err(FarmClientError::InsufficientBalance(
+                    "No tokens were unlocked".to_string(),
+                ));
+            }
+        }
+
+        // remove liquidity
+        inst.push(self.new_instruction_remove_liquidity_vault(
+            wallet_address,
+            vault_name,
+            unlocked_amount,
+        )?);
+
+        // check if tokens need to be unwrapped
+        let (is_token_a_sol, is_token_b_sol) = self.vault_has_sol_tokens(vault_name)?;
+        let pool_name = self.get_underlying_pool(vault_name)?.name.to_string();
+        let (is_token_a_wrapped, is_token_b_wrapped) =
+            self.pool_has_saber_wrapped_tokens(&pool_name)?;
+
+        if is_token_a_wrapped {
+            inst.push(self.new_instruction_unwrap_token(
+                wallet_address,
+                &pool_name,
+                TokenSelector::TokenA,
+                0.0,
+            )?);
+        }
+        if is_token_b_wrapped {
+            inst.push(self.new_instruction_unwrap_token(
+                wallet_address,
+                &pool_name,
+                TokenSelector::TokenB,
+                0.0,
+            )?);
+        }
+        if is_token_a_sol || is_token_b_sol {
+            inst.push(self.new_instruction_close_token_account(wallet_address, "SOL")?);
+        }
+
+        Ok(inst)
     }
 
     /// Creates a new Vault Init Instruction
