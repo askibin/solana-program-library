@@ -1073,7 +1073,7 @@ paths:
           description: Json object or error string
   /api/v1/new_instructions_add_liquidity_vault:
     get:
-      description: "Creates new instructions for adding liquidity to the Vault"
+      description: "Creates a new complete set of instructions for adding liquidity to the Vault"
       parameters:
         - name: wallet_address
           in: query
@@ -1135,6 +1135,44 @@ paths:
   /api/v1/new_instruction_remove_liquidity_vault:
     get:
       description: "Creates a new Instruction for removing liquidity from the Vault"
+      parameters:
+        - name: wallet_address
+          in: query
+          schema:
+            type: string
+        - name: vault_name
+          in: query
+          schema:
+            type: string
+        - name: ui_amount
+          in: query
+          schema:
+            type: string
+      responses:
+        default:
+          description: Json object or error string
+  /api/v1/new_instructions_remove_liquidity_vault:
+    get:
+      description: "Creates a new complete set of Instructions for removing liquidity from the Vault"
+      parameters:
+        - name: wallet_address
+          in: query
+          schema:
+            type: string
+        - name: vault_name
+          in: query
+          schema:
+            type: string
+        - name: ui_amount
+          in: query
+          schema:
+            type: string
+      responses:
+        default:
+          description: Json object or error string
+  /api/v1/new_instructions_remove_unlocked_liquidity_vault:
+    get:
+      description: "Creates a new complete set of Instructions for removing unlocked liquidity from the Vault"
       parameters:
         - name: wallet_address
           in: query

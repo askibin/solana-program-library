@@ -1654,7 +1654,7 @@ async fn new_instruction_add_liquidity_vault(
     Ok(JsonWithInstruction::new(&instruction))
 }
 
-/// Creates new instructions for adding liquidity to the Vault
+/// Creates a new complete set of instructions for adding liquidity to the Vault
 #[get("/new_instructions_add_liquidity_vault?<wallet_address>&<vault_name>&<max_token_a_ui_amount>&<max_token_b_ui_amount>")]
 async fn new_instructions_add_liquidity_vault(
     wallet_address: Option<PubkeyParam>,
@@ -1738,6 +1738,48 @@ async fn new_instruction_remove_liquidity_vault(
         .map_err(|e| NotFound(e.to_string()))?;
 
     Ok(JsonWithInstruction::new(&instruction))
+}
+
+/// Creates a new complete set of Instructions for removing liquidity from the Vault
+#[get("/new_instructions_remove_liquidity_vault?<wallet_address>&<vault_name>&<ui_amount>")]
+async fn new_instructions_remove_liquidity_vault(
+    wallet_address: Option<PubkeyParam>,
+    vault_name: &str,
+    ui_amount: f64,
+    farm_client: &State<FarmClientArc>,
+) -> Result<JsonWithInstructions, NotFound<String>> {
+    let wallet_address = check_unwrap_pubkey(wallet_address, "wallet_address")?;
+    let farm_client = farm_client
+        .inner()
+        .lock()
+        .map_err(|e| NotFound(e.to_string()))?;
+    let instructions = farm_client
+        .new_instructions_remove_liquidity_vault(&wallet_address, vault_name, ui_amount)
+        .map_err(|e| NotFound(e.to_string()))?;
+
+    Ok(JsonWithInstructions::new(&instructions))
+}
+
+/// Creates a new complete set of Instructions for removing unlocked liquidity from the Vault
+#[get(
+    "/new_instructions_remove_unlocked_liquidity_vault?<wallet_address>&<vault_name>&<ui_amount>"
+)]
+async fn new_instructions_remove_unlocked_liquidity_vault(
+    wallet_address: Option<PubkeyParam>,
+    vault_name: &str,
+    ui_amount: f64,
+    farm_client: &State<FarmClientArc>,
+) -> Result<JsonWithInstructions, NotFound<String>> {
+    let wallet_address = check_unwrap_pubkey(wallet_address, "wallet_address")?;
+    let farm_client = farm_client
+        .inner()
+        .lock()
+        .map_err(|e| NotFound(e.to_string()))?;
+    let instructions = farm_client
+        .new_instructions_remove_unlocked_liquidity_vault(&wallet_address, vault_name, ui_amount)
+        .map_err(|e| NotFound(e.to_string()))?;
+
+    Ok(JsonWithInstructions::new(&instructions))
 }
 
 /// Creates a new Instruction for adding liquidity to the Pool
@@ -2058,6 +2100,8 @@ pub async fn stage(config: &Config) -> AdHoc {
                     new_instruction_lock_liquidity_vault,
                     new_instruction_unlock_liquidity_vault,
                     new_instruction_remove_liquidity_vault,
+                    new_instructions_remove_liquidity_vault,
+                    new_instructions_remove_unlocked_liquidity_vault,
                     new_instruction_add_liquidity_pool,
                     new_instruction_remove_liquidity_pool,
                     new_instruction_swap,
