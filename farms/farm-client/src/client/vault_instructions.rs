@@ -209,7 +209,7 @@ impl FarmClient {
                 ));
             }
         }
-        return Ok(inst);
+        Ok(inst)
     }
 
     /// Creates a new Instruction for locking liquidity in the Vault
